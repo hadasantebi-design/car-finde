@@ -1,0 +1,18 @@
+# Render blueprint — deploy with "New +" → "Blueprint" and point at this repo.
+# The daily scan (APScheduler) + SQLite need an always-on instance with a
+# persistent disk, so this uses the Starter plan (free instances sleep and
+# have no disk, which would reset the DB and stop the scheduler).
+services:
+  - type: web
+    name: car-finder
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /
+    envVars:
+      - key: DB_PATH
+        value: /data/listings.db
+    disk:
+      name: car-finder-data
+      mountPath: /data
+      sizeGB: 1

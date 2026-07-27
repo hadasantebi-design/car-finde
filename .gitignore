@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Local database (persisted via the host's volume, not git)
+data/*.db
+data/*.db-journal
+data/*.sqlite*
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

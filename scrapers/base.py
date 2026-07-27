@@ -1,0 +1,200 @@
+"""Base classes shared by every site scraper.
+
+To add a new site, create a file in this folder that subclasses
+``BaseScraper``, implement ``search()``, and register it in
+``scrapers/__init__.py``. That's it — the rest of the app picks it up.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import re
+from dataclasses import dataclass, field, asdict
+from typing import Any
+
+import requests
+
+log = logging.getLogger("scrapers")
+
+# Cross-site make/model aliases. Sites use Hebrew and/or English names with
+# different spellings; we match loosely (case-insensitive substring) against
+# any alias so one config entry ("Kia"/"Niro") works everywhere.
+MAKE_ALIASES = {
+    "kia": ["kia", "קיה", "קאיה"],
+    "hyundai": ["hyundai", "יונדאי"],
+    "toyota": ["toyota", "טויוטה"],
+}
+MODEL_ALIASES = {
+    "niro": ["niro", "נירו"],
+    "elantra": ["elantra", "lantra", "אלנטרה", "לנטרה"],
+    "corolla": ["corolla", "קורולה"],
+}
+
+
+def make_aliases(make: str) -> list[str]:
+    return MAKE_ALIASES.get((make or "").strip().lower(), [(make or "").strip().lower()])
+
+
+def model_aliases(model: str) -> list[str]:
+    return MODEL_ALIASES.get((model or "").strip().lower(), [(model or "").strip().lower()])
+
+
+def _contains_any(text: str, needles: list[str]) -> bool:
+    t = (text or "").lower()
+    return any(n and n in t for n in needles)
+
+
+@dataclass
+class Listing:
+    """A single car listing, normalized across all sites."""
+    site: str
+    url: str
+    make: str = ""
+    model: str = ""
+    year: int | None = None
+    km: int | None = None
+    price: int | None = None
+    hand: int | None = None          # number of previous owners (מספר יד)
+    gearbox: str = ""
+    fuel: str = ""
+    title: str = ""
+    location: str = ""
+    image: str = ""
+    raw: dict = field(default_factory=dict)
+
+    @property
+    def id(self) -> str:
+        """Stable unique id used for de-duplication."""
+        return hashlib.sha1(f"{self.site}|{self.url}".encode("utf-8")).hexdigest()
+
+    def to_row(self) -> dict[str, Any]:
+        d = asdict(self)
+        d.pop("raw", None)
+        d["id"] = self.id
+        return d
+
+
+class SearchSpec:
+    """One 'what to look for' entry plus the global filters."""
+    def __init__(self, make: str, model: str, fuel: str, filters: dict):
+        self.make = make
+        self.model = model
+        self.fuel = fuel
+        self.filters = filters or {}
+
+    def __repr__(self) -> str:
+        return f"<SearchSpec {self.make} {self.model} {self.fuel}>"
+
+
+class BaseScraper:
+    """Subclass this for each site. Set ``name`` and implement ``search``."""
+    name: str = "base"
+    # A human label shown in the UI
+    label: str = "Base"
+
+    def __init__(self, timeout: int = 20):
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0 Safari/537.36"
+            ),
+            "Accept-Language": "he-IL,he;q=0.9,en;q=0.8",
+        })
+
+    def search(self, spec: SearchSpec) -> list[Listing]:
+        """Return listings for one make/model. Must be implemented by subclass."""
+        raise NotImplementedError
+
+    # ---- helpers subclasses can reuse -------------------------------------
+
+    def passes_filters(self, listing: Listing, filters: dict) -> bool:
+        """Apply the global numeric/text filters locally.
+
+        Sites that can't filter server-side rely on this so results are
+        always consistent regardless of the source.
+        """
+        f = filters or {}
+        if listing.year is not None:
+            if f.get("year_min") and listing.year < f["year_min"]:
+                return False
+            if f.get("year_max") and listing.year > f["year_max"]:
+                return False
+        if listing.km is not None:
+            if f.get("km_max") and listing.km > f["km_max"]:
+                return False
+            if f.get("km_min") and listing.km < f["km_min"]:
+                return False
+        if listing.price is not None:
+            if f.get("price_min") and listing.price < f["price_min"]:
+                return False
+            if f.get("price_max") and listing.price > f["price_max"]:
+                return False
+        if listing.hand is not None and f.get("hand_max"):
+            if listing.hand > f["hand_max"]:
+                return False
+        gb = (f.get("gearbox") or "any").lower()
+        if gb != "any" and listing.gearbox and gb not in listing.gearbox.lower():
+            return False
+        return True
+
+    def get(self, url: str, **kwargs) -> requests.Response:
+        kwargs.setdefault("timeout", self.timeout)
+        return self.session.get(url, **kwargs)
+
+    # ---- make/model/fuel matching (for sites that filter client-side) -----
+
+    def matches_make(self, spec: SearchSpec, *texts: str) -> bool:
+        aliases = make_aliases(spec.make)
+        return any(_contains_any(t, aliases) for t in texts if t)
+
+    def matches_model(self, spec: SearchSpec, *texts: str) -> bool:
+        aliases = model_aliases(spec.model)
+        return any(_contains_any(t, aliases) for t in texts if t)
+
+    def matches_fuel(self, spec: SearchSpec, fuel_text: str = "", *,
+                     hybrid: bool | None = None, plugin: bool | None = None,
+                     electric: bool | None = None) -> bool:
+        """Match the requested fuel. Pass explicit booleans when the site
+        exposes them; otherwise we substring-match the free-text fuel field."""
+        want = (spec.fuel or "any").lower()
+        if want == "any":
+            return True
+        if hybrid is not None or plugin is not None or electric is not None:
+            if want == "hybrid":
+                return bool(hybrid) and not bool(plugin)
+            if want == "plugin_hybrid":
+                return bool(plugin)
+            if want == "electric":
+                return bool(electric)
+            return True
+        ft = (fuel_text or "").lower()
+        if not ft:
+            return True  # unknown fuel -> don't exclude; global filters still apply
+        keys = {
+            "hybrid": ["hybrid", "היבריד"],
+            "plugin_hybrid": ["plug", "פלאג", "נטען"],
+            "electric": ["electric", "חשמל"],
+            "gasoline": ["gasolin", "בנזין"],
+            "diesel": ["diesel", "דיזל"],
+        }.get(want, [want])
+        # For plain "hybrid", avoid matching plug-in strings.
+        if want == "hybrid" and _contains_any(ft, ["plug", "פלאג", "נטען"]):
+            return False
+        return _contains_any(ft, keys)
+
+    @staticmethod
+    def next_data(html: str) -> dict:
+        """Extract and parse the Next.js __NEXT_DATA__ JSON blob, or {}."""
+        m = re.search(
+            r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S
+        )
+        if not m:
+            return {}
+        try:
+            return json.loads(m.group(1))
+        except (json.JSONDecodeError, TypeError):
+            return {}

@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>מאתר הרכבים שלי</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&family=Secular+One&display=swap" rel="stylesheet">
+<style>
+/* ===== Redis design tokens (from tokens.css) ===== */
+:root{
+  --rd-hyper-03:#FFACA7;--rd-hyper-04:#FD736A;--rd-hyper-05:#FF4438;--rd-hyper-06:#EB352A;--rd-hyper-08:#D1281E;--rd-hyper-10:#351D22;
+  --rd-midnight-base:#091A23;--rd-midnight-02:#07151C;
+  --rd-dusk-01:#F3F3F3;--rd-dusk-04:#B9C2C6;--rd-dusk-05:#8A99A0;--rd-dusk-06:#5C707A;--rd-dusk-07:#2D4754;--rd-dusk-08:#163341;--rd-dusk-09:#0D212C;
+  --rd-yellow-05:#DCFF1E;--rd-yellow-06:#D0F41D;--rd-blue-03:#80DBFF;--rd-blue-04:#5ED1FF;--rd-white:#FFFFFF;
+  --rd-radius-xs:2px;--rd-radius-sm:4px;--rd-radius-md:5px;--rd-radius-lg:8px;--rd-radius-xl:12px;--rd-radius-pill:999px;
+  --rd-ease-out:cubic-bezier(0.16,1,0.3,1);
+}
+.theme-dark{
+  --bg:var(--rd-midnight-base);--bg-elev:var(--rd-dusk-09);--bg-sunken:var(--rd-midnight-02);
+  --fg:var(--rd-white);--fg-muted:var(--rd-dusk-04);--fg-subtle:var(--rd-dusk-05);
+  --border:var(--rd-dusk-07);--border-strong:var(--rd-dusk-06);
+  --action:var(--rd-hyper-05);--action-hover:var(--rd-hyper-04);--action-fg:var(--rd-white);
+  color-scheme:dark;
+}
+/* ===== reset + motion (from comp) ===== */
+*{box-sizing:border-box}
+html,body{margin:0}
+@keyframes rdspin{to{transform:rotate(360deg)}}
+@keyframes rdshimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes rdup{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes rdscrim{from{opacity:0}to{opacity:1}}
+@keyframes rddrawer{from{transform:translateX(-24px);opacity:0}to{transform:none;opacity:1}}
+::selection{background:var(--brand);color:#fff}
+img{display:block;max-width:100%}
+button{font:inherit;cursor:pointer;color:inherit}
+input,select{font:inherit}
+a{color:var(--rd-blue-03);text-decoration:none}
+a:hover{color:var(--rd-blue-04)}
+:focus-visible{outline:2px solid var(--rd-blue-04);outline-offset:2px;border-radius:var(--rd-radius-sm)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--rd-dusk-07);border-radius:99px}
+/* hover helpers (comp used style-hover) */
+.card:hover{border-color:var(--fg)!important;transform:translateY(-2px)}
+.scanbtn:hover:not(:disabled){background:#DB2777!important}
+.savebtn:hover{background:var(--action-hover)!important}
+.rmbtn:hover{border-color:var(--brand)!important;color:var(--rd-hyper-04)!important}
+.srcbtn:hover{border-color:var(--fg)!important}
+</style>
+</head>
+<body class="theme-dark" style="background:var(--rd-midnight-base)">
+<div id="app" class="theme-dark" dir="rtl" lang="he" style="--good:#17C77E;--bad:#FF4438;--flat:var(--rd-dusk-05);--brand:#EC4899;--brand-mid:#F472B6;--brand-soft:#F9A8D4;--action:#EC4899;--action-hover:#DB2777;--action-fg:#fff;--font-head:'Secular One',sans-serif;--font-body:'IBM Plex Sans Hebrew',sans-serif;font-family:var(--font-body);min-height:100vh;background:var(--bg);color:var(--fg);display:flex;flex-direction:column;-webkit-font-smoothing:antialiased"></div>
+
+<script>
+"use strict";
+const $app = document.getElementById('app');
+
+// ---------- state ----------
+const S = {
+  screen:'results', site:'all', sort:'newest',
+  newOnly:false, favOnly:false, dropOnly:false,
+  selectedId:null, trendRange:30, isMobile:false,
+  loading:true, scanning:false, scanDone:0, scanTotal:6,
+  lastScan:null, siteError:null,
+  cars:[], trend:{}, siteLabels:{},
+  models:[], filters:{}, sites:[], sched:{time:'08:00',tz:'Asia/Jerusalem',startup:false},
+  saved:false,
+};
+
+// site status (which sources are live vs need a browser vs coming soon)
+const SITE_STATUS = {
+  eldan:'active', autocar_alber:'active',
+  shlomo_sixt:'soon', yad2:'browser', kalmobil:'browser', auto_center:'browser',
+};
+const FUEL_HE = {hybrid:'היברידי',plugin_hybrid:'פלאגאין',electric:'חשמלי',gasoline:'בנזין',diesel:'דיזל',any:'הכול'};
+const FUEL_KEY = {'היברידי':'hybrid','פלאגאין':'plugin_hybrid','פלאג אין':'plugin_hybrid','חשמלי':'electric','בנזין':'gasoline','דיזל':'diesel','הכול':'any'};
+const GEAR_HE = {automatic:'אוטומט',manual:'ידני',any:'הכול'};
+const GEAR_KEY = {'אוטומט':'automatic','ידני':'manual','הכול':'any'};
+const MODEL_HE = {'Kia Niro':'קיה נירו','Hyundai Elantra':'יונדאי אלנטרה','Toyota Corolla':'טויוטה קורולה'};
+
+// ---------- helpers ----------
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtP = n => '₪'+Math.round(n||0).toLocaleString('en-US');
+const dLabel = d => d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric'});
+const dFull = d => d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric',year:'2-digit'});
+function sparkPts(vals,w,h,pad){ if(!vals.length) return ''; const mn=Math.min(...vals),mx=Math.max(...vals),sp=(mx-mn)||1; return vals.map((v,i)=>{const x=(vals.length<=1?w/2:i/(vals.length-1)*w).toFixed(1); const y=(pad+(1-(v-mn)/sp)*(h-2*pad)).toFixed(1); return x+','+y;}).join(' '); }
+function line(vals,W,H,pad){ const mn=Math.min(...vals),mx=Math.max(...vals),sp=(mx-mn)||1; const n=vals.length; const pts=vals.map((v,i)=>({x:n<=1?0:i/(n-1)*W, y:pad+(1-(v-mn)/sp)*(H-2*pad)})); const d=pts.map((p,i)=>(i?'L':'M')+p.x.toFixed(1)+' '+p.y.toFixed(1)).join(' '); return {d, area:d+` L ${W} ${H} L 0 ${H} Z`, first:pts[0]||{x:0,y:H}, last:pts[n-1]||{x:0,y:H}, min:mn, max:mx}; }
+const relTime = ts => { if(!ts) return '—'; const m=Math.round((Date.now()-ts*1000)/60000); if(m<=0)return 'הרגע'; if(m<60)return 'לפני '+m+' דק׳'; const h=Math.round(m/60); if(h<24)return 'לפני '+h+' שע׳'; return 'לפני '+Math.round(h/24)+' ימים'; };
+
+// ---------- data ----------
+function normalize(l){
+  const change = l.price_change_total||0;
+  const start = (l.first_price!=null?l.first_price:l.price);
+  const dir = change<-200?'down':change>200?'up':'flat';
+  const pct = start?(change/start*100):0;
+  return {
+    id:l.id, make:l.make, model:l.model, year:l.year, km:l.km, hand:l.hand,
+    gearbox:l.gearbox||'', region:l.location||'', site:l.site, price:l.price,
+    start, change, dir, pct, isNew:!l.seen_by_user, fav:!!l.favorite, avail:!!l.is_active,
+    favChange:l.fav_price_change||0, favStart:l.favorite_price,
+    firstSeen:l.first_seen?new Date(l.first_seen*1000):new Date(),
+    lastSeen:l.last_seen?new Date(l.last_seen*1000):new Date(),
+    hist:(l.history||[]).map(h=>({p:h.price,date:new Date(h.ts*1000)})),
+    image:l.image||'', url:l.url||'#', title:l.title||`${l.make} ${l.model}`,
+  };
+}
+const siteName = id => S.siteLabels[id] || id;
+
+async function loadConfig(){
+  const r = await fetch('/api/config'); const d = await r.json();
+  const c = d.config||{}; S.siteLabels = d.site_labels||{};
+  S.models = (c.searches||[]).map(s=>({make:s.make,model:s.model,fuel:s.fuel||'any'}));
+  const f = c.filters||{};
+  S.filters = {
+    yearFrom:f.year_min||'', yearTo:f.year_max||'', kmFrom:f.km_min||'', kmTo:f.km_max||'',
+    priceFrom:f.price_min||'', priceTo:f.price_max||'', maxHand:f.hand_max||9,
+    gearbox:f.gearbox||'any', regions:f.regions||[],
+  };
+  S.sites = c.sites||[];
+  const sch = c.schedule||{};
+  const cm = /^(\d+)\s+(\d+)/.exec(sch.cron||'0 8 * * *');
+  S.sched = {time:cm?String(cm[2]).padStart(2,'0')+':'+String(cm[1]).padStart(2,'0'):'08:00', tz:sch.timezone||'Asia/Jerusalem', startup:!!sch.run_on_startup};
+}
+async function loadListings(){
+  const r = await fetch('/api/listings'); const d = await r.json();
+  S.cars = (d.listings||[]).map(normalize);
+  const st = d.stats||{};
+  S.lastScan = st.last_run ? st.last_run.started : null;
+}
+async function loadTrends(){
+  const r = await fetch('/api/trends'); const d = await r.json();
+  S.trend = d.trends||{};
+}
+async function loadAll(){ S.loading=true; render(); await loadConfig(); await Promise.all([loadListings(),loadTrends()]); S.loading=false; render(); }
+
+// ---------- actions ----------
+async function scanNow(){
+  if(S.scanning) return;
+  S.scanTotal = (S.sites&&S.sites.length)||6; S.scanDone=0; S.scanning=true; render();
+  const tick=setInterval(()=>{ if(S.scanDone<S.scanTotal-1){S.scanDone++; render();} },1500);
+  try{ const r=await fetch('/api/scan',{method:'POST'}); const sum=await r.json();
+    if(sum && sum.per_site){ // surface a site that returned nothing but is expected live
+      const failed=Object.entries(sum.per_site).filter(([k,v])=>SITE_STATUS[k]==='active'&&v===0).map(([k])=>k);
+      S.siteError = failed.length?siteName(failed[0]):null;
+    }
+  }catch(e){ S.siteError='כללי'; }
+  clearInterval(tick); S.scanDone=S.scanTotal; S.scanning=false;
+  await Promise.all([loadListings(),loadTrends()]); render();
+}
+async function toggleFav(id){
+  const c=S.cars.find(x=>x.id===id); if(!c) return; const nv=!c.fav; c.fav=nv; render();
+  await fetch('/api/favorite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,favorite:nv})});
+  await loadListings(); render();
+}
+async function markAllSeen(){ S.cars.forEach(c=>c.isNew=false); render(); await fetch('/api/mark-seen',{method:'POST'}); await loadListings(); render(); }
+function openCar(id){ const c=S.cars.find(x=>x.id===id); if(c) c.isNew=false; S.selectedId=id; render(); if(c){ fetch('/api/mark-seen',{method:'POST'}); } }
+function go(screen){ S.screen=screen; S.selectedId=null; render(); }
+
+async function saveSettings(){
+  readSettingsInputs();
+  const f=S.filters;
+  const num = v => (v===''||v==null)?null:Number(v);
+  const cm=/^(\d{1,2}):(\d{2})$/.exec(S.sched.time)||[null,'8','0'];
+  const cfg={
+    searches:S.models.map(m=>({make:m.make,model:m.model,fuel:m.fuel||'any'})),
+    filters:{year_min:num(f.yearFrom),year_max:num(f.yearTo),km_min:num(f.kmFrom),km_max:num(f.kmTo),
+             price_min:num(f.priceFrom),price_max:num(f.priceTo),hand_max:(f.maxHand==9?null:Number(f.maxHand)),
+             gearbox:f.gearbox,regions:f.regions},
+    sites:S.sites,
+    schedule:{cron:`${Number(cm[2])} ${Number(cm[1])} * * *`,timezone:S.sched.tz,run_on_startup:S.sched.startup},
+  };
+  await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({config:cfg})});
+  S.saved=true; render(); setTimeout(()=>{S.saved=false;render();},2500);
+}
+function readSettingsInputs(){
+  $app.querySelectorAll('[data-input]').forEach(el=>{ const k=el.getAttribute('data-input'); setInput(k,el.value); });
+}
+function setInput(key,val){
+  if(key.startsWith('filter:')) S.filters[key.slice(7)]=val;
+  else if(key==='schedTime') S.sched.time=val;
+  else if(key.startsWith('nm:')) S['nm_'+key.slice(3)]=val;
+}
+function addModel(){
+  const mk=($app.querySelector('[data-input="nm:make"]')||{}).value||'';
+  const md=($app.querySelector('[data-input="nm:model"]')||{}).value||'';
+  const en=($app.querySelector('[data-input="nm:engine"]')||{}).value||'';
+  if(!mk.trim()||!md.trim()) return;
+  S.models.push({make:mk.trim(),model:md.trim(),fuel:FUEL_KEY[en.trim()]||'any'});
+  render();
+}
+function removeModel(i){ S.models.splice(i,1); render(); }
+function toggleRegion(r){ const i=S.filters.regions.indexOf(r); if(i>=0)S.filters.regions.splice(i,1); else S.filters.regions.push(r); render(); }
+function toggleSite(id){ const i=S.sites.indexOf(id); if(i>=0)S.sites.splice(i,1); else S.sites.push(id); render(); }
+
+// ---------- selectors ----------
+function filteredResults(){
+  let list=S.cars.filter(c=>c.avail);
+  if(S.site!=='all') list=list.filter(c=>c.site===S.site);
+  if(S.newOnly) list=list.filter(c=>c.isNew);
+  if(S.favOnly) list=list.filter(c=>c.fav);
+  if(S.dropOnly) list=list.filter(c=>c.dir==='down');
+  const by={newest:(a,b)=>b.firstSeen-a.firstSeen,price:(a,b)=>a.price-b.price,km:(a,b)=>(a.km||1e9)-(b.km||1e9),year:(a,b)=>(b.year||0)-(a.year||0),drop:(a,b)=>a.pct-b.pct};
+  return [...list].sort(by[S.sort]||by.newest);
+}
+function trendColor(dir){ return dir==='down'?'var(--good)':dir==='up'?'var(--bad)':'var(--flat)'; }
+
+// ---------- car card ----------
+function imgHtml(c){
+  if(c.image) return `<img src="${esc(c.image)}" alt="${esc(c.title)}" loading="lazy" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:34px;background:var(--bg-sunken);color:var(--fg-subtle)">🚗</div>`;
+  return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:34px;background:var(--bg-sunken);color:var(--fg-subtle)">🚗</div>`;
+}
+const chip = t => `<span style="background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg-muted);font-size:12px;padding:3px 9px;border-radius:var(--rd-radius-sm)">${esc(t)}</span>`;
+function cardHtml(c){
+  const color=trendColor(c.dir);
+  const spark=sparkPts(c.hist.map(h=>h.p),100,30,3);
+  const arrow=c.dir==='down'?'↓':c.dir==='up'?'↑':'–';
+  const abs=c.dir==='flat'?'ללא שינוי':fmtP(Math.abs(c.change));
+  const pctw=c.dir==='flat'?'':`(${Math.abs(c.pct).toFixed(1)}%)`;
+  return `<div class="card" data-act="open:${c.id}" style="background:var(--bg-elev);border:1px solid ${c.isNew?'var(--brand)':'var(--border)'};border-radius:var(--rd-radius-lg);overflow:hidden;cursor:pointer;display:flex;flex-direction:column;transition:border-color 150ms,transform 150ms">
+    <div style="position:relative;aspect-ratio:16/10;background:var(--bg-sunken)">${imgHtml(c)}
+      <div style="position:absolute;top:10px;inset-inline-start:10px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none">
+        ${c.isNew?`<span style="background:var(--rd-yellow-05);color:#091A23;font-size:11px;font-weight:800;padding:3px 8px;border-radius:var(--rd-radius-sm)">חדש</span>`:''}
+        ${c.dir==='down'?`<span style="background:var(--good);color:#04231a;font-size:11px;font-weight:800;padding:3px 8px;border-radius:var(--rd-radius-sm)">ירידת מחיר</span>`:''}
+      </div>
+      <button data-act="fav:${c.id}" data-stop aria-label="הוסף למועדפים" style="position:absolute;top:8px;inset-inline-end:8px;width:36px;height:36px;border-radius:50%;border:none;background:rgba(9,26,23,.6);backdrop-filter:blur(4px);color:${c.fav?'var(--brand)':'#fff'};font-size:18px;display:flex;align-items:center;justify-content:center;line-height:1">${c.fav?'♥':'♡'}</button>
+      <span style="position:absolute;bottom:8px;inset-inline-end:8px;background:rgba(9,26,23,.72);color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:var(--rd-radius-sm)">${esc(siteName(c.site))}</span>
+    </div>
+    <div style="padding:14px;display:flex;flex-direction:column;gap:10px;flex:1">
+      <div style="font-family:var(--font-head);font-weight:400;font-size:17px;line-height:1.3">${esc(c.title)}</div>
+      <div style="display:flex;align-items:flex-end;gap:10px;justify-content:space-between">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <div style="font-size:21px;font-weight:700;letter-spacing:-.02em">${fmtP(c.price)}</div>
+          <div style="display:flex;align-items:center;gap:5px;color:${color};font-size:13px;font-weight:600"><span style="font-size:14px">${arrow}</span><span>${abs}</span><span style="opacity:.75">${pctw}</span></div>
+        </div>
+        <svg viewBox="0 0 100 30" preserveAspectRatio="none" style="width:92px;height:30px;flex:none"><polyline points="${spark}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"></polyline></svg>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${chip(c.km!=null?c.km.toLocaleString('en-US')+' ק״מ':'ק״מ —')}
+        ${chip(c.hand!=null?'יד '+c.hand:'יד —')}
+        ${chip(c.gearbox||'—')}
+        ${chip(c.region||'—')}
+      </div>
+      <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--border)">
+        <a href="${esc(c.url)}" target="_blank" rel="noopener" data-stop style="font-size:13px;font-weight:600">צפייה במקור ↗</a>
+        <span style="font-size:12px;color:var(--fg-subtle)">${dLabel(c.firstSeen)}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ---------- views ----------
+const statCard=(label,val,color)=>`<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:14px 16px"><div style="font-size:12px;color:var(--fg-muted)">${label}</div><div style="font-size:26px;font-weight:700;${color?'color:'+color:''}">${val}</div></div>`;
+function selectHtml(key,val,opts){ return `<div style="position:relative"><select data-select="${key}" style="appearance:none;background:var(--bg-elev);color:var(--fg);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:9px 34px 9px 12px;font-size:13px;font-weight:600">${opts.map(([id,label])=>`<option value="${esc(id)}" ${id==val?'selected':''}>${esc(label)}</option>`).join('')}</select><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--fg-muted);font-size:11px">▼</span></div>`; }
+function skeletons(){ const one=`<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);overflow:hidden"><div style="aspect-ratio:16/10;background:linear-gradient(90deg,var(--bg-sunken) 25%,var(--rd-dusk-08) 50%,var(--bg-sunken) 75%);background-size:200% 100%;animation:rdshimmer 1.4s infinite"></div><div style="padding:14px;display:flex;flex-direction:column;gap:12px"><div style="height:16px;width:70%;border-radius:4px;background:linear-gradient(90deg,var(--bg-sunken) 25%,var(--rd-dusk-08) 50%,var(--bg-sunken) 75%);background-size:200% 100%;animation:rdshimmer 1.4s infinite"></div><div style="height:24px;width:45%;border-radius:4px;background:linear-gradient(90deg,var(--bg-sunken) 25%,var(--rd-dusk-08) 50%,var(--bg-sunken) 75%);background-size:200% 100%;animation:rdshimmer 1.4s infinite"></div></div></div>`; return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">${one.repeat(6)}</div>`; }
+function emptyResults(){ return `<div style="text-align:center;padding:64px 24px;border:1px dashed var(--border);border-radius:var(--rd-radius-lg);background:var(--bg-sunken)"><div style="font-size:44px;margin-bottom:12px">🔍</div><div style="font-size:20px;font-weight:700;margin-bottom:6px">אין רכבים שתואמים לסינון</div><div style="font-size:14px;color:var(--fg-muted);max-width:360px;margin:0 auto 18px">נסי לנקות את המסננים או להריץ סריקה חדשה כדי למשוך מודעות עדכניות.</div><button data-act="clearfilters" style="background:var(--action);color:var(--action-fg);border:none;padding:10px 20px;border-radius:var(--rd-radius-md);font-weight:700;font-size:14px">נקה מסננים</button></div>`; }
+
+function viewResults(){
+  const results=filteredResults();
+  const active=S.cars.filter(c=>c.avail);
+  const unseen=active.filter(c=>c.isNew).length;
+  const drops=active.filter(c=>c.dir==='down').length;
+  const favs=S.cars.filter(c=>c.fav).length;
+  const isLoading=S.loading;
+  const isEmpty=!isLoading && results.length===0;
+  const tgl=on=>`background:${on?'var(--brand)':'transparent'};color:${on?'#fff':'var(--fg-muted)'};border:1px solid ${on?'var(--brand)':'var(--border)'}`;
+  const siteOpts=[['all','כל האתרים'],...Object.keys(S.siteLabels).map(id=>[id,S.siteLabels[id]])];
+  const sortOpts=[['newest','החדשים ביותר'],['price','מחיר (נמוך לגבוה)'],['km','קילומטראז׳'],['year','שנתון (חדש לישן)'],['drop','ירידת המחיר הגדולה']];
+  return `<div style="display:flex;flex-direction:column;gap:16px;animation:rdup .3s var(--rd-ease-out)">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+      ${statCard('רכבים פעילים',active.length)}
+      <div style="background:var(--bg-elev);border:1px solid var(--brand);border-radius:var(--rd-radius-lg);padding:14px 16px;position:relative;overflow:hidden">
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 120% at 100% 0,rgba(236,72,153,.18),transparent 60%);pointer-events:none"></div>
+        <div style="font-size:12px;color:var(--brand-soft);position:relative">חדשים שלא נצפו</div>
+        <div style="display:flex;align-items:center;gap:10px;position:relative">
+          <div style="font-size:26px;font-weight:700;color:var(--brand-mid)">${unseen}</div>
+          ${unseen?`<button data-act="markseen" style="background:transparent;border:1px solid var(--brand);color:var(--brand-soft);font-size:11px;font-weight:600;padding:4px 10px;border-radius:var(--rd-radius-pill)">סמן הכל כנצפה</button>`:''}
+        </div>
+      </div>
+      ${statCard('מועדפים',favs)}
+      ${statCard('ירידות מחיר',drops,'var(--good)')}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      ${selectHtml('site',S.site,siteOpts)}
+      ${selectHtml('sort',S.sort,sortOpts)}
+      <div style="width:1px;height:24px;background:var(--border);margin:0 2px"></div>
+      <button data-act="tgl:newOnly" style="padding:9px 14px;border-radius:var(--rd-radius-pill);font-size:13px;font-weight:600;${tgl(S.newOnly)}">חדשים בלבד</button>
+      <button data-act="tgl:favOnly" style="padding:9px 14px;border-radius:var(--rd-radius-pill);font-size:13px;font-weight:600;${tgl(S.favOnly)}">מועדפים בלבד</button>
+      <button data-act="tgl:dropOnly" style="padding:9px 14px;border-radius:var(--rd-radius-pill);font-size:13px;font-weight:600;${tgl(S.dropOnly)}">ירדו במחיר</button>
+      <span style="margin-inline-start:auto;font-size:13px;color:var(--fg-muted)">${results.length} תוצאות</span>
+    </div>
+    ${S.siteError?`<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--rd-radius-md);background:var(--rd-hyper-10);border:1px solid var(--rd-hyper-08);color:var(--rd-hyper-03);font-size:13px"><span style="font-size:16px">⚠︎</span><span>הסריקה של <b>${esc(S.siteError)}</b> לא החזירה תוצאות. שאר האתרים עודכנו כרגיל.</span><button data-act="dismisserr" style="margin-inline-start:auto;background:transparent;border:none;color:var(--rd-hyper-03);font-size:13px;text-decoration:underline">התעלם</button></div>`:''}
+    ${isLoading?skeletons():''}
+    ${isEmpty?emptyResults():''}
+    ${(!isLoading&&!isEmpty)?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">${results.map(cardHtml).join('')}</div>`:''}
+  </div>`;
+}
+
+function viewFav(){
+  const favList=S.cars.filter(c=>c.fav).sort((a,b)=>a.pct-b.pct);
+  if(!favList.length) return `<div style="animation:rdup .3s var(--rd-ease-out)"><h1 style="font-family:var(--font-head);font-size:26px;font-weight:400;margin:0 0 16px">מועדפים</h1><div style="text-align:center;padding:64px 24px;border:1px dashed var(--border);border-radius:var(--rd-radius-lg);background:var(--bg-sunken)"><div style="font-size:44px;margin-bottom:12px">♡</div><div style="font-size:20px;font-weight:700;margin-bottom:6px">עוד לא סימנת מועדפים</div><div style="font-size:14px;color:var(--fg-muted);max-width:360px;margin:0 auto 18px">לחצי על ♥ בכרטיס רכב כדי לעקוב אחרי המחיר שלו לאורך זמן.</div><button data-act="nav:results" style="background:var(--action);color:var(--action-fg);border:none;padding:10px 20px;border-radius:var(--rd-radius-md);font-weight:700;font-size:14px">למסך התוצאות</button></div></div>`;
+  return `<div style="display:flex;flex-direction:column;gap:16px;animation:rdup .3s var(--rd-ease-out)">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><h1 style="font-family:var(--font-head);font-size:26px;font-weight:400;margin:0">מועדפים</h1><span style="font-size:13px;color:var(--fg-muted)">ממויין לפי ירידת המחיר הגדולה ביותר</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">${favList.map(favCardHtml).join('')}</div>
+  </div>`;
+}
+function favCardHtml(c){
+  const color=trendColor(c.dir);
+  const spark=sparkPts(c.hist.map(h=>h.p),100,40,4);
+  const dropTag=c.dir==='down'?`ירד ${fmtP(Math.abs(c.change))} (${Math.abs(c.pct).toFixed(1)}%)`:(c.dir==='up'?`עלה ${fmtP(Math.abs(c.change))}`:'ללא שינוי');
+  const dropBg=c.dir==='down'?'rgba(23,199,126,.15)':(c.dir==='up'?'var(--rd-hyper-10)':'var(--bg-sunken)');
+  const dropColor=c.dir==='down'?'var(--good)':(c.dir==='up'?'var(--rd-hyper-03)':'var(--fg-muted)');
+  return `<div class="card" data-act="open:${c.id}" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);overflow:hidden;cursor:pointer;display:flex;flex-direction:column;opacity:${c.avail?'1':'0.55'}">
+    <div style="position:relative;aspect-ratio:16/9;background:var(--bg-sunken)">${imgHtml(c)}
+      ${!c.avail?`<div style="position:absolute;inset:0;background:rgba(7,21,28,.55);display:flex;align-items:center;justify-content:center"><span style="background:var(--rd-dusk-08);color:var(--fg-muted);border:1px solid var(--border);font-size:12px;font-weight:700;padding:6px 12px;border-radius:var(--rd-radius-md)">כבר לא זמין · הוסר ב-${dLabel(c.lastSeen)}</span></div>`:''}
+      <button data-act="fav:${c.id}" data-stop aria-label="הסר ממועדפים" style="position:absolute;top:8px;inset-inline-end:8px;width:36px;height:36px;border-radius:50%;border:none;background:rgba(9,26,23,.6);backdrop-filter:blur(4px);color:var(--brand);font-size:18px;display:flex;align-items:center;justify-content:center">♥</button>
+      <span style="position:absolute;bottom:8px;inset-inline-end:8px;background:rgba(9,26,23,.72);color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:var(--rd-radius-sm)">${esc(siteName(c.site))}</span>
+    </div>
+    <div style="padding:16px;display:flex;flex-direction:column;gap:12px;flex:1">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div style="font-family:var(--font-head);font-weight:400;font-size:17px">${esc(c.title)}</div><span style="background:${dropBg};color:${dropColor};font-size:13px;font-weight:800;padding:4px 10px;border-radius:var(--rd-radius-md);white-space:nowrap">${dropTag}</span></div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="display:flex;flex-direction:column"><span style="font-size:11px;color:var(--fg-subtle)">מחיר ראשוני</span><span style="font-size:15px;color:var(--fg-muted);text-decoration:line-through">${fmtP(c.start)}</span></div>
+        <span style="color:var(--fg-subtle)">←</span>
+        <div style="display:flex;flex-direction:column"><span style="font-size:11px;color:var(--fg-subtle)">מחיר נוכחי</span><span style="font-size:19px;font-weight:700;color:${color}">${fmtP(c.price)}</span></div>
+      </div>
+      <svg viewBox="0 0 100 40" preserveAspectRatio="none" style="width:100%;height:52px"><polyline points="${spark}" fill="none" stroke="${color}" stroke-width="2.2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"></polyline></svg>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid var(--border)"><a href="${esc(c.url)}" target="_blank" rel="noopener" data-stop style="font-size:13px;font-weight:600">צפייה במקור ↗</a><span style="font-size:12px;color:var(--fg-subtle)">יד ${c.hand!=null?c.hand:'—'} · ${c.km!=null?c.km.toLocaleString('en-US'):'—'} ק״מ</span></div>
+    </div>
+  </div>`;
+}
+
+function selHtml(key,val,opts){ return `<select data-select="${key}" style="width:100%;appearance:none;background:var(--bg-sunken);color:var(--fg);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">${opts.map(([id,label])=>`<option value="${esc(id)}" ${String(id)==String(val)?'selected':''}>${esc(label)}</option>`).join('')}</select>`; }
+
+function viewTrends(){
+  const rangeChips=[[7,'7 ימים'],[30,'30 יום'],[90,'90 יום'],[9999,'הכול']];
+  const keys=Object.keys(S.trend).filter(k=>(S.trend[k]||[]).length>=2);
+  const models=keys.map(k=>{
+    let series=S.trend[k].slice();
+    if(S.trendRange!==9999){ const cut=Date.now()/1000-S.trendRange*86400; const f=series.filter(p=>p.ts>=cut); if(f.length>=2) series=f; }
+    const pr=series.map(p=>p.median_price), ct=series.map(p=>p.count), dt=series.map(p=>new Date(p.ts*1000));
+    const lc=line(pr,600,170,14), cc=line(ct,600,170,14);
+    const cur=pr[pr.length-1], back=pr[0], ch=cur-back, chPct=back?ch/back*100:0;
+    const chDir=ch<-200?'down':ch>200?'up':'flat';
+    return {name:MODEL_HE[k]||k, en:k, medianFmt:fmtP(cur),
+      change30:chDir==='flat'?'ללא שינוי':`${chDir==='down'?'↓':'↑'} ${fmtP(Math.abs(ch))} (${Math.abs(chPct).toFixed(1)}%)`,
+      changeColor:chDir==='down'?'var(--good)':chDir==='up'?'var(--bad)':'var(--flat)',
+      rangeFmt:fmtP(Math.min(...pr))+' – '+fmtP(Math.max(...pr)),
+      pricePath:lc.d,priceArea:lc.area,priceLastX:lc.last.x.toFixed(1),priceLastY:lc.last.y.toFixed(1),
+      countPath:cc.d,countArea:cc.area,countLastX:cc.last.x.toFixed(1),countLastY:cc.last.y.toFixed(1),countNow:ct[ct.length-1],
+      dateStart:dLabel(dt[0]),dateEnd:dLabel(dt[dt.length-1])};
+  });
+  const body = models.map(m=>`<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:20px">
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <div><div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-muted)">${esc(m.en)}</div><div style="font-family:var(--font-head);font-size:20px;font-weight:400">${esc(m.name)}</div></div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap">
+        <div><div style="font-size:11px;color:var(--fg-subtle)">חציון נוכחי</div><div style="font-size:20px;font-weight:700">${m.medianFmt}</div></div>
+        <div><div style="font-size:11px;color:var(--fg-subtle)">שינוי בטווח</div><div style="font-size:20px;font-weight:700;color:${m.changeColor}">${m.change30}</div></div>
+        <div><div style="font-size:11px;color:var(--fg-subtle)">טווח מחירים</div><div style="font-size:20px;font-weight:700">${m.rangeFmt}</div></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">
+      <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:8px">מחיר חציוני לאורך זמן</div><svg viewBox="0 0 600 170" preserveAspectRatio="none" style="width:100%;height:150px;overflow:visible"><line x1="0" y1="150" x2="600" y2="150" stroke="var(--border)" stroke-width="1" vector-effect="non-scaling-stroke"></line><path d="${m.priceArea}" fill="var(--rd-yellow-05)" opacity="0.10"></path><path d="${m.pricePath}" fill="none" stroke="var(--rd-yellow-05)" stroke-width="2.4" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="${m.priceLastX}" cy="${m.priceLastY}" r="4" fill="var(--rd-yellow-05)"></circle></svg><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--fg-subtle);margin-top:4px"><span>${m.dateStart}</span><span>${m.dateEnd}</span></div></div>
+      <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:8px">מספר מודעות זמינות</div><svg viewBox="0 0 600 170" preserveAspectRatio="none" style="width:100%;height:150px;overflow:visible"><line x1="0" y1="150" x2="600" y2="150" stroke="var(--border)" stroke-width="1" vector-effect="non-scaling-stroke"></line><path d="${m.countArea}" fill="var(--rd-blue-03)" opacity="0.10"></path><path d="${m.countPath}" fill="none" stroke="var(--rd-blue-03)" stroke-width="2.4" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="${m.countLastX}" cy="${m.countLastY}" r="4" fill="var(--rd-blue-03)"></circle></svg><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--fg-subtle);margin-top:4px"><span>${m.dateStart}</span><span>${m.countNow} מודעות היום</span></div></div>
+    </div>
+  </div>`).join('');
+  const needMore = models.length===0 ? `<div style="text-align:center;padding:48px 24px;border:1px dashed var(--border);border-radius:var(--rd-radius-lg);background:var(--bg-sunken)"><div style="font-size:16px;font-weight:600">צריך עוד ימי סריקה כדי לבנות מגמה 📈</div><div style="font-size:13px;color:var(--fg-muted);margin-top:6px">כל סריקה יומית מוסיפה נקודה. חזרי לכאן בעוד כמה ימים.</div></div>` : '';
+  return `<div style="display:flex;flex-direction:column;gap:16px;animation:rdup .3s var(--rd-ease-out)">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between"><h1 style="font-family:var(--font-head);font-size:26px;font-weight:400;margin:0">מגמות</h1>
+      <div style="display:flex;gap:4px;background:var(--bg-sunken);padding:4px;border-radius:var(--rd-radius-lg);border:1px solid var(--border)">${rangeChips.map(([v,l])=>`<button data-act="range:${v}" style="padding:6px 14px;border:none;border-radius:var(--rd-radius-md);font-size:13px;font-weight:600;background:${S.trendRange===v?'var(--action)':'transparent'};color:${S.trendRange===v?'var(--action-fg)':'var(--fg-muted)'}">${l}</button>`).join('')}</div>
+    </div>${body}${needMore}</div>`;
+}
+
+function viewSettings(){
+  const f=S.filters;
+  const statusMap={active:['פעיל','var(--good)','rgba(23,199,126,.15)'],browser:['דורש דפדפן','var(--rd-yellow-06)','rgba(220,255,30,.12)'],soon:['בקרוב','var(--fg-subtle)','var(--bg-sunken)'],unavailable:['לא זמין','var(--fg-subtle)','var(--bg-sunken)']};
+  const allSites=Object.keys(S.siteLabels);
+  const rangeFields=[['שנתון','yearFrom','yearTo'],['קילומטראז׳','kmFrom','kmTo'],['מחיר (₪)','priceFrom','priceTo']];
+  const regions=['מרכז','שרון','ירושלים','שפלה','דרום','צפון'];
+  const tgl=on=>`background:${on?'var(--brand)':'transparent'};color:${on?'#fff':'var(--fg-muted)'};border:1px solid ${on?'var(--brand)':'var(--border)'}`;
+  return `<div style="display:flex;flex-direction:column;gap:20px;max-width:760px;animation:rdup .3s var(--rd-ease-out)">
+    <h1 style="font-family:var(--font-head);font-size:26px;font-weight:400;margin:0">הגדרות</h1>
+    <section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:20px">
+      <div style="font-family:var(--font-head);font-size:16px;margin-bottom:4px">דגמים לחיפוש</div>
+      <div style="font-size:13px;color:var(--fg-muted);margin-bottom:14px">יצרן, דגם וסוג מנוע. אפשר להוסיף ולהסיר.</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+        ${S.models.map((m,i)=>`<div style="display:flex;align-items:center;gap:10px;background:var(--bg-sunken);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:10px 14px"><span style="font-weight:600;font-size:15px">${esc(m.make)} ${esc(m.model)}</span><span style="background:var(--bg-elev);border:1px solid var(--border);color:var(--fg-muted);font-size:11px;padding:2px 8px;border-radius:var(--rd-radius-pill)">${esc(FUEL_HE[m.fuel]||m.fuel)}</span><button class="rmbtn" data-act="rmmodel:${i}" aria-label="הסר דגם" style="margin-inline-start:auto;background:transparent;border:1px solid var(--border);color:var(--fg-muted);width:28px;height:28px;border-radius:var(--rd-radius-sm);font-size:15px">✕</button></div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input data-input="nm:make" placeholder="יצרן (למשל Kia)" style="flex:1;min-width:100px;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">
+        <input data-input="nm:model" placeholder="דגם (למשל Niro)" style="flex:1;min-width:100px;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">
+        <input data-input="nm:engine" placeholder="מנוע (היברידי)" style="width:130px;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">
+        <button data-act="addmodel" style="background:var(--rd-dusk-08);color:var(--fg);border:1px solid var(--border-strong);border-radius:var(--rd-radius-md);padding:9px 16px;font-weight:700;font-size:14px">הוסף</button>
+      </div>
+    </section>
+    <section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:20px">
+      <div style="font-family:var(--font-head);font-size:16px;margin-bottom:14px">מסננים גלובליים</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+        ${rangeFields.map(([label,kf,kt])=>`<div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">${label}</div><div style="display:flex;align-items:center;gap:8px"><input data-input="filter:${kf}" value="${esc(f[kf])}" placeholder="מ־" style="width:100%;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px"><span style="color:var(--fg-subtle)">–</span><input data-input="filter:${kt}" value="${esc(f[kt])}" placeholder="עד" style="width:100%;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px"></div></div>`).join('')}
+        <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">יד מקסימלית</div>${selHtml('maxHand',f.maxHand,[['1','יד ראשונה'],['2','עד יד שנייה'],['3','עד יד שלישית'],['9','ללא הגבלה']])}</div>
+        <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">תיבת הילוכים</div>${selHtml('gearbox',f.gearbox,[['any','הכול'],['automatic','אוטומט'],['manual','ידני']])}</div>
+      </div>
+      <div style="margin-top:16px"><div style="font-size:12px;color:var(--fg-muted);margin-bottom:8px">אזורים</div><div style="display:flex;flex-wrap:wrap;gap:8px">${regions.map(r=>`<button data-act="region:${r}" style="padding:7px 14px;border-radius:var(--rd-radius-pill);font-size:13px;font-weight:600;${tgl(f.regions.includes(r))}">${r}</button>`).join('')}</div></div>
+    </section>
+    <section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:20px">
+      <div style="font-family:var(--font-head);font-size:16px;margin-bottom:14px">אתרים</div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        ${allSites.map(id=>{ const st=SITE_STATUS[id]||'active'; const [lbl,col,bg]=statusMap[st]; const locked=st==='unavailable'; const on=S.sites.includes(id)&&!locked;
+          return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)"><span style="font-weight:600;font-size:15px">${esc(S.siteLabels[id]||id)}</span><span style="background:${bg};color:${col};font-size:11px;font-weight:700;padding:2px 9px;border-radius:var(--rd-radius-pill)">${lbl}</span><button data-act="site:${id}" ${locked?'disabled':''} aria-label="הפעל/כבה אתר" style="margin-inline-start:auto;width:46px;height:26px;border-radius:99px;border:none;background:${on?'var(--brand)':'var(--rd-dusk-07)'};position:relative;opacity:${locked?'0.4':'1'}"><span style="position:absolute;top:3px;${on?'left':'right'}:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:all 150ms"></span></button></div>`; }).join('')}
+      </div>
+    </section>
+    <section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:20px">
+      <div style="font-family:var(--font-head);font-size:16px;margin-bottom:14px">תזמון</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px">
+        <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">שעת סריקה יומית</div><input type="time" data-input="schedTime" value="${esc(S.sched.time)}" style="width:100%;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px"></div>
+        <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">אזור זמן</div>${selHtml('tz',S.sched.tz,[['Asia/Jerusalem','Asia/Jerusalem (GMT+3)'],['UTC','UTC'],['Europe/London','Europe/London']])}</div>
+      </div>
+      <label style="display:flex;align-items:center;gap:12px;cursor:pointer"><button data-act="startup" role="switch" aria-checked="${S.sched.startup}" style="width:46px;height:26px;border-radius:99px;border:none;background:${S.sched.startup?'var(--brand)':'var(--rd-dusk-07)'};position:relative;flex:none"><span style="position:absolute;top:3px;${S.sched.startup?'left':'right'}:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:all 150ms"></span></button><span style="font-size:14px">סרוק בעליית האפליקציה</span></label>
+    </section>
+    <div style="display:flex;align-items:center;gap:14px;position:sticky;bottom:0;padding:12px 0;background:linear-gradient(0deg,var(--bg) 60%,transparent)">
+      <button class="savebtn" data-act="save" style="background:var(--action);color:var(--action-fg);border:none;padding:12px 26px;border-radius:var(--rd-radius-md);font-weight:700;font-size:15px">שמור הגדרות</button>
+      ${S.saved?`<span style="color:var(--good);font-size:14px;font-weight:600;animation:rdup .2s ease">✓ ההגדרות נשמרו</span>`:''}
+    </div>
+  </div>`;
+}
+
+function drawerHtml(){
+  const c=S.cars.find(x=>x.id===S.selectedId); if(!c) return '';
+  const color=trendColor(c.dir);
+  const ch=line(c.hist.map(h=>h.p),560,200,16);
+  const totalChange=c.dir==='flat'?'ללא שינוי':`${c.dir==='down'?'↓':'↑'} ${fmtP(Math.abs(c.change))} (${Math.abs(c.pct).toFixed(1)}%)`;
+  const arrow=c.dir==='down'?'↓':c.dir==='up'?'↑':'–';
+  return `<div data-act="closedrawer" style="position:fixed;inset:0;z-index:70;background:rgba(7,21,28,.6);backdrop-filter:blur(4px);animation:rdscrim .2s ease;display:flex;justify-content:flex-start">
+    <div data-stop style="width:min(560px,100%);height:100%;background:var(--bg);border-inline-end:1px solid var(--border);overflow-y:auto;animation:rddrawer .3s var(--rd-ease-out);display:flex;flex-direction:column">
+      <div style="position:sticky;top:0;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:14px 18px;display:flex;align-items:center;gap:12px;z-index:2">
+        <button data-act="closedrawer" aria-label="סגור" style="width:36px;height:36px;border-radius:var(--rd-radius-md);border:1px solid var(--border);background:var(--bg-elev);font-size:18px">✕</button>
+        <span style="font-family:var(--font-head);font-size:16px">היסטוריית מחיר</span>
+        <button data-act="fav:${c.id}" style="margin-inline-start:auto;display:flex;align-items:center;gap:6px;background:var(--bg-elev);border:1px solid ${c.fav?'var(--brand)':'var(--border)'};color:${c.fav?'var(--brand)':'#fff'};border-radius:var(--rd-radius-md);padding:7px 14px;font-weight:600;font-size:13px">${c.fav?'♥':'♡'} ${c.fav?'במועדפים':'הוסף למועדפים'}</button>
+      </div>
+      <div style="padding:18px;display:flex;flex-direction:column;gap:18px">
+        <div style="aspect-ratio:16/9;border-radius:var(--rd-radius-lg);overflow:hidden;background:var(--bg-sunken);border:1px solid var(--border)">${imgHtml(c)}</div>
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><h2 style="font-family:var(--font-head);font-size:24px;font-weight:400;margin:0">${esc(c.title)}</h2><span style="background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg-muted);font-size:12px;padding:2px 9px;border-radius:var(--rd-radius-pill)">${esc(siteName(c.site))}</span></div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px"><span style="font-size:28px;font-weight:700">${fmtP(c.price)}</span><span style="color:${color};font-weight:700;font-size:15px">${arrow} ${totalChange}</span></div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${chip(c.km!=null?c.km.toLocaleString('en-US')+' ק״מ':'—')}${chip(c.hand!=null?'יד '+c.hand:'—')}${chip(c.gearbox||'—')}${chip(c.region||'—')}${chip('שנתון '+(c.year||'—'))}</div>
+        <div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:18px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:16px">
+            <div><div style="font-size:11px;color:var(--fg-subtle)">מחיר ראשוני</div><div style="font-size:16px;font-weight:700;color:var(--fg-muted)">${fmtP(c.start)}</div></div>
+            <div style="text-align:center"><div style="font-size:11px;color:var(--fg-subtle)">שינוי כולל</div><div style="font-size:16px;font-weight:700;color:${color}">${totalChange}</div></div>
+            <div style="text-align:left"><div style="font-size:11px;color:var(--fg-subtle)">נוכחי</div><div style="font-size:16px;font-weight:700">${fmtP(c.price)}</div></div>
+          </div>
+          <svg viewBox="0 0 560 200" preserveAspectRatio="none" style="width:100%;height:200px;overflow:visible"><path d="${ch.area}" fill="${color}" opacity="0.10"></path><path d="${ch.d}" fill="none" stroke="${color}" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="${ch.first.x.toFixed(1)}" cy="${ch.first.y.toFixed(1)}" r="5" fill="var(--bg)" stroke="var(--fg-muted)" stroke-width="2"></circle><circle cx="${ch.last.x.toFixed(1)}" cy="${ch.last.y.toFixed(1)}" r="5.5" fill="${color}"></circle></svg>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--fg-subtle);margin-top:6px"><span>ראשוני · ${dFull(c.firstSeen)}</span><span>נוכחי · ${dFull(c.lastSeen)}</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div style="background:var(--bg-sunken);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:12px 14px"><div style="font-size:11px;color:var(--fg-subtle)">נצפה לראשונה</div><div style="font-size:14px;font-weight:600">${dFull(c.firstSeen)}</div></div>
+          <div style="background:var(--bg-sunken);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:12px 14px"><div style="font-size:11px;color:var(--fg-subtle)">נצפה לאחרונה</div><div style="font-size:14px;font-weight:600">${dFull(c.lastSeen)}</div></div>
+        </div>
+        <a class="srcbtn" href="${esc(c.url)}" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:center;gap:8px;background:var(--bg-elev);border:1px solid var(--border-strong);color:var(--fg);border-radius:var(--rd-radius-md);padding:13px;font-weight:700;font-size:15px">צפייה במקור באתר ${esc(siteName(c.site))} ↗</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ---------- shell + render ----------
+function navItems(){
+  const unseen=S.cars.filter(c=>c.avail&&c.isNew).length;
+  const favs=S.cars.filter(c=>c.fav).length;
+  return [['results','תוצאות',unseen],['favorites','מועדפים',favs],['trends','מגמות',0],['settings','הגדרות',0]];
+}
+function render(){
+  const scanLabel=S.scanning?'סורק…':(S.isMobile?'סרוק':'סרוק עכשיו');
+  const nav=navItems();
+  const desktopNav=`<nav style="display:flex;align-items:center;gap:4px;background:var(--bg-sunken);padding:4px;border-radius:var(--rd-radius-lg);border:1px solid var(--border)">${nav.map(([id,label,badge])=>{const active=S.screen===id;return `<button data-act="nav:${id}" aria-current="${active?'page':'false'}" style="padding:8px 16px;border:none;border-radius:var(--rd-radius-md);font-size:14px;font-weight:600;background:${active?'var(--action)':'transparent'};color:${active?'var(--action-fg)':'var(--fg)'};display:flex;align-items:center;gap:8px">${label}${badge?`<span style="min-width:18px;height:18px;padding:0 5px;border-radius:99px;background:${active?'rgba(255,255,255,.25)':'var(--brand)'};color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center">${badge}</span>`:''}</button>`;}).join('')}</nav>`;
+  const mobileNav=`<nav style="position:fixed;bottom:0;inset-inline:0;z-index:40;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(12px);border-top:1px solid var(--border);display:flex;padding:6px 8px calc(6px + env(safe-area-inset-bottom))">${nav.map(([id,label,badge])=>{const active=S.screen===id;return `<button data-act="nav:${id}" style="flex:1;background:transparent;border:none;padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:3px;color:${active?'var(--fg)':'var(--fg-muted)'};position:relative;min-height:52px;justify-content:center">${active?`<span style="position:absolute;top:0;width:28px;height:3px;border-radius:99px;background:var(--brand)"></span>`:''}<span style="font-size:13px;font-weight:${active?'700':'500'}">${label}</span>${badge?`<span style="position:absolute;top:4px;inset-inline-end:calc(50% - 22px);min-width:16px;height:16px;padding:0 4px;border-radius:99px;background:var(--brand);color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center">${badge}</span>`:''}</button>`;}).join('')}</nav>`;
+  let main='';
+  if(S.screen==='results') main=viewResults();
+  else if(S.screen==='favorites') main=viewFav();
+  else if(S.screen==='trends') main=viewTrends();
+  else if(S.screen==='settings') main=viewSettings();
+  const toast = S.scanning ? `<div style="position:fixed;z-index:60;bottom:${S.isMobile?'84px':'16px'};inset-inline-start:16px;background:var(--bg-elev);border:1px solid var(--border-strong);border-inline-start:3px solid var(--brand);border-radius:var(--rd-radius-lg);padding:14px 16px;min-width:260px;box-shadow:0 24px 48px rgba(0,0,0,.4);animation:rdup .25s var(--rd-ease-out)"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="width:16px;height:16px;border:2px solid var(--rd-dusk-06);border-top-color:var(--brand);border-radius:50%;animation:rdspin .7s linear infinite"></span><span style="font-weight:700;font-size:14px">סורק אתרים…</span><span style="margin-inline-start:auto;font-size:13px;color:var(--fg-muted)">${S.scanDone}/${S.scanTotal}</span></div><div style="height:6px;background:var(--bg-sunken);border-radius:99px;overflow:hidden"><div style="height:100%;width:${(S.scanDone/S.scanTotal*100).toFixed(0)}%;background:var(--brand);border-radius:99px;transition:width 300ms var(--rd-ease-out)"></div></div></div>`:'';
+  $app.innerHTML=`
+    <header style="position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)">
+      <div style="max-width:1280px;margin:0 auto;padding:0 16px;height:64px;display:flex;align-items:center;gap:16px;justify-content:space-between">
+        <span style="font-family:var(--font-head);font-size:22px;white-space:nowrap">🚗 מאתר הרכבים שלי</span>
+        ${S.isMobile?'':desktopNav}
+        <div style="display:flex;align-items:center;gap:12px">
+          ${S.isMobile?'':`<span style="font-size:12px;color:var(--fg-muted);white-space:nowrap">סריקה אחרונה: ${relTime(S.lastScan)}</span>`}
+          <button class="scanbtn" data-act="scan" ${S.scanning?'disabled':''} style="display:flex;align-items:center;gap:8px;background:#EC4899;color:#fff;border:none;padding:0 18px;height:42px;border-radius:var(--rd-radius-md);font-weight:700;font-size:14px;white-space:nowrap;opacity:${S.scanning?'0.85':'1'}">${S.scanning?`<span style="width:15px;height:15px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:rdspin .7s linear infinite"></span>`:''}<span>${scanLabel}</span></button>
+        </div>
+      </div>
+    </header>
+    <main style="flex:1;width:100%;max-width:1280px;margin:0 auto;padding:20px 16px 24px;padding-bottom:${S.isMobile?'84px':'24px'}">${main}</main>
+    ${S.isMobile?mobileNav:''}
+    ${toast}
+    ${S.selectedId?drawerHtml():''}
+  `;
+}
+
+// ---------- events ----------
+$app.addEventListener('click',e=>{
+  const t=e.target.closest('[data-act]'); if(!t) return;
+  const act=t.getAttribute('data-act');
+  // let real links behave normally
+  if(e.target.closest('a[href]') && !act.startsWith('fav:')) return;
+  if(act.startsWith('open:')){ if(e.target.closest('[data-stop]')) return; openCar(act.slice(5)); return; }
+  if(act.startsWith('fav:')){ e.stopPropagation(); toggleFav(act.slice(4)); return; }
+  if(act.startsWith('nav:')) go(act.slice(4));
+  else if(act==='scan') scanNow();
+  else if(act==='markseen') markAllSeen();
+  else if(act.startsWith('tgl:')){ S[act.slice(4)]=!S[act.slice(4)]; render(); }
+  else if(act==='dismisserr'){ S.siteError=null; render(); }
+  else if(act==='clearfilters'){ S.site='all';S.newOnly=S.favOnly=S.dropOnly=false; render(); }
+  else if(act.startsWith('range:')) { S.trendRange=Number(act.slice(6)); render(); }
+  else if(act.startsWith('rmmodel:')) removeModel(Number(act.slice(8)));
+  else if(act==='addmodel') addModel();
+  else if(act.startsWith('region:')) toggleRegion(act.slice(7));
+  else if(act.startsWith('site:')) toggleSite(act.slice(5));
+  else if(act==='startup'){ S.sched.startup=!S.sched.startup; render(); }
+  else if(act==='save') saveSettings();
+  else if(act==='closedrawer'){ if(e.target.closest('[data-stop]')&&e.target.getAttribute('data-act')!=='closedrawer') return; S.selectedId=null; render(); }
+});
+$app.addEventListener('change',e=>{
+  const sel=e.target.closest('[data-select]'); if(!sel) return;
+  const k=sel.getAttribute('data-select'); const v=sel.value;
+  if(k==='site'){S.site=v;render();} else if(k==='sort'){S.sort=v;render();}
+  else if(k==='maxHand'){S.filters.maxHand=v;} else if(k==='gearbox'){S.filters.gearbox=v;}
+  else if(k==='tz'){S.sched.tz=v;}
+});
+$app.addEventListener('input',e=>{ const el=e.target.closest('[data-input]'); if(el) setInput(el.getAttribute('data-input'),el.value); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&S.selectedId){S.selectedId=null;render();} });
+const mq=window.matchMedia('(max-width:860px)');
+S.isMobile=mq.matches; mq.addEventListener('change',ev=>{S.isMobile=ev.matches;render();});
+
+loadAll();
+</script>
+</body>
+</html>

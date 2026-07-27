@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "car-finder",
+      "runtimeExecutable": "/Users/hadas.antebi/Comp/car-finder/.venv/bin/uvicorn",
+      "runtimeArgs": ["app:app", "--host", "127.0.0.1", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}

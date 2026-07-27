@@ -1,0 +1,45 @@
+# ============================================================
+# Car Finder – search configuration
+# Everything here is editable from the app UI, or by hand.
+# Add/remove models and change filters freely (Yad2-style).
+# ============================================================
+
+# Which cars to look for. Add as many blocks as you like.
+searches:
+  - make: "Kia"
+    model: "Niro"
+    fuel: "hybrid"        # hybrid | plugin_hybrid | electric | gasoline | diesel | any
+  - make: "Hyundai"
+    model: "Elantra"
+    fuel: "hybrid"
+  - make: "Toyota"
+    model: "Corolla"
+    fuel: "hybrid"
+
+# Global filters applied to every search (like Yad2 filters).
+# Leave a value as null to ignore that filter.
+filters:
+  year_min: 2021         # שנתון 21 ומעלה
+  year_max: null
+  km_max: 40000          # קילומטראז' נמוך – עד 40,000
+  km_min: null
+  price_min: null
+  price_max: null
+  hand_max: null         # מספר יד (בעלים קודמים) מקסימלי
+  gearbox: "any"         # automatic | manual | any
+  regions: []            # e.g. ["מרכז", "שרון"]; empty = כל הארץ
+
+# Which sites to scan. Turn sites on/off here.
+sites:
+  - yad2
+  - kalmobil
+  - shlomo_sixt
+  - auto_center
+  - eldan
+  - autocar_alber
+
+# Daily scan schedule (cron, Israel time).
+schedule:
+  cron: "0 8 * * *"      # every day at 08:00
+  timezone: "Asia/Jerusalem"
+  run_on_startup: false  # set true to also scan immediately when the app boots
