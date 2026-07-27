@@ -521,3 +521,104 @@ class AutoCenterScraper(BrowserScraper):
     def model_aliases_for(model):
         from .base import model_aliases
         return model_aliases(model)
+
+
+class FreesbeScraper(BaseScraper):
+    """freesbe (freesbe.com) — Carasso / Cal-Auto group, large ex-leasing stock.
+    Next.js SSR with a per-model listing URL; data in __NEXT_DATA__."""
+    name = "freesbe"
+    label = "freesbe (קרסו)"
+    LIST = "https://freesbe.com/used-car-for-sale/listings/{make}/{model}"
+
+    def search(self, spec: SearchSpec) -> list[Listing]:
+        from urllib.parse import unquote
+        url = self.LIST.format(make=spec.make.lower(), model=spec.model.lower())
+        out: list[Listing] = []
+        try:
+            r = self.get(url)
+            if r.status_code != 200:
+                log.warning("freesbe %s/%s -> %s", spec.make, spec.model, r.status_code)
+                return []
+            ssr = self.next_data(r.text).get("props", {}).get("pageProps", {}).get("carsSSR", {}) or {}
+            for it in (ssr.get("cars") or []):
+                model = it.get("carZoneModelName") or ""
+                name = it.get("name") or ""
+                desc = unquote(it.get("carProgrammaticDescription") or "")
+                if not self.matches_model(spec, model, name):
+                    continue
+                if not self.matches_fuel(spec, f"{name} {desc}"):
+                    continue
+                cn = it.get("carNumber")
+                imgs = it.get("images") or []
+                img = (imgs[0].get("url") or "").replace(" ", "%20") if imgs and isinstance(imgs[0], dict) else ""
+                origin = it.get("previousCarOwnershipHand") or ""
+                lst = Listing(
+                    site=self.name,
+                    url=f"https://freesbe.com/used-car-for-sale/listings/{spec.make.lower()}/{spec.model.lower()}#{cn}",
+                    make=spec.make, model=spec.model,
+                    year=it.get("year"), km=it.get("kms"), price=it.get("carPrice"),
+                    hand=it.get("carHand"), fuel=spec.fuel,
+                    title=f"{it.get('carZoneManufacturerName','')} {model} {it.get('year') or ''}".strip(),
+                    image=img, notes=(f"{origin} {desc}").strip()[:250], seller_type="dealer",
+                    raw={"origin": origin},
+                )
+                if self.passes_filters(lst, spec.filters):
+                    out.append(lst)
+        except Exception as e:
+            log.exception("freesbe scrape failed for %s %s: %s", spec.make, spec.model, e)
+        return out
+
+
+class UmiTradeScraper(BaseScraper):
+    """UMI Trade (umi-trade.co.il) — importer/leasing dealer. Server-rendered
+    schema.org JSON-LD Vehicle nodes (first page); filter client-side."""
+    name = "umi_trade"
+    label = "UMI טרייד"
+
+    def search(self, spec: SearchSpec) -> list[Listing]:
+        from urllib.parse import quote
+        out: list[Listing] = []
+        try:
+            r = self.get("https://www.umi-trade.co.il/" + quote("חיפוש-כלי-רכב") + "/")
+            if r.status_code != 200:
+                return []
+            soup = BeautifulSoup(r.text, "lxml")
+            for tag in soup.find_all("script", type="application/ld+json"):
+                try:
+                    blob = json.loads(tag.string or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                for node in (blob if isinstance(blob, list) else [blob]):
+                    if not isinstance(node, dict):
+                        continue
+                    if str(node.get("@type", "")).lower() not in ("vehicle", "car", "product"):
+                        continue
+                    brand = node.get("brand")
+                    brand = brand.get("name") if isinstance(brand, dict) else (brand or "")
+                    name = node.get("name") or ""
+                    model = node.get("model") if isinstance(node.get("model"), str) else name
+                    if not self.matches_make(spec, brand, name):
+                        continue
+                    if not self.matches_model(spec, model, name):
+                        continue
+                    if not self.matches_fuel(spec, f"{node.get('fuelType') or ''} {name}"):
+                        continue
+                    off = node.get("offers") or {}
+                    off = off[0] if isinstance(off, list) and off else off
+                    price = _digits(off.get("price")) if isinstance(off, dict) else None
+                    mil = node.get("mileageFromOdometer")
+                    km = _digits(mil.get("value")) if isinstance(mil, dict) else _digits(mil)
+                    url = node.get("URL") or node.get("url") or (off.get("url") if isinstance(off, dict) else "") or "https://www.umi-trade.co.il/"
+                    lst = Listing(
+                        site=self.name, url=url, make=spec.make, model=spec.model,
+                        year=_digits(node.get("modelDate") or node.get("productionDate")),
+                        km=km, price=price, fuel=spec.fuel,
+                        title=name or f"{spec.make} {spec.model}",
+                        image=node.get("image") if isinstance(node.get("image"), str) else "",
+                        seller_type="dealer", raw={},
+                    )
+                    if self.passes_filters(lst, spec.filters):
+                        out.append(lst)
+        except Exception as e:
+            log.exception("umi_trade scrape failed: %s", e)
+        return out

@@ -36,6 +36,7 @@ def build(scan: bool = True):
         "listings": storage.get_listings(active_only=False),
         "stats": storage.stats(),
         "trends": storage.get_trends(),
+        "site_status": storage.get_site_status(),
     }
 
     DOCS.mkdir(exist_ok=True)

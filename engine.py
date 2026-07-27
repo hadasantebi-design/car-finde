@@ -43,6 +43,8 @@ def run_scan() -> dict:
             log.warning("unknown site in config: %s", site)
             continue
         site_count = 0
+        site_errors = 0
+        last_err = ""
         for s in searches:
             spec = SearchSpec(s["make"], s["model"], s.get("fuel", "any"), filters)
             try:
@@ -50,6 +52,8 @@ def run_scan() -> dict:
             except Exception as e:
                 log.exception("%s failed on %s: %s", site, spec, e)
                 results = []
+                site_errors += 1
+                last_err = str(e)
             for lst in results:
                 row = lst.to_row()
                 all_rows.append(row)
@@ -57,6 +61,10 @@ def run_scan() -> dict:
                 site_count += 1
         per_site[site] = site_count
         log.info("%s -> %d listings", site, site_count)
+        # ok = at least one search ran without raising (silent-0 still recorded
+        # via count, so the UI can flag a site that stops returning listings)
+        ok = site_errors < len(searches) if searches else True
+        storage.record_site_run(site, ok, site_count, last_err, ts=started)
         if hasattr(scraper, "close"):
             try:
                 scraper.close()

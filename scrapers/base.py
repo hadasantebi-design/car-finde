@@ -103,6 +103,9 @@ class Listing:
     title: str = ""
     location: str = ""
     image: str = ""
+    notes: str = ""            # extra free text (origin/description) — powers red-flags & exclusions
+    phone: str = ""            # contact phone if the source exposes one
+    seller_type: str = ""      # "dealer" | "private" | ""
     raw: dict = field(default_factory=dict)
 
     @property

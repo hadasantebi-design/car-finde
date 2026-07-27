@@ -10,6 +10,7 @@ from .dealerships import (
     AutoCenterScraper,
     EldanScraper,
     AutocarAlberScraper,
+    FreesbeScraper,
 )
 
 REGISTRY = {
@@ -21,6 +22,7 @@ REGISTRY = {
         AutoCenterScraper,
         EldanScraper,
         AutocarAlberScraper,
+        FreesbeScraper,
     ]
 }
 

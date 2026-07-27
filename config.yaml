@@ -37,6 +37,7 @@ sites:
   - auto_center
   - eldan
   - autocar_alber
+  - freesbe
 
 # Daily scan schedule (cron, Israel time).
 schedule:

@@ -90,12 +90,24 @@ def init_db():
                 total INTEGER, new INTEGER, note TEXT
             )
         """)
-        # --- migrate older DBs that pre-date the favorite columns -------------
+        # Per-site outcome of each scan, so the UI can show "last successful
+        # scan" and surface silently-failing sites.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS site_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL, site TEXT, ok INTEGER, count INTEGER, error TEXT
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS ix_sr_site ON site_runs(site)")
+        # --- migrate older DBs: add columns that post-date the first schema ---
         have = _columns(c, "listings")
         for col, ddl in [
             ("favorite", "favorite INTEGER DEFAULT 0"),
             ("favorite_price", "favorite_price INTEGER"),
             ("favorited_at", "favorited_at REAL"),
+            ("notes", "notes TEXT"),
+            ("phone", "phone TEXT"),
+            ("seller_type", "seller_type TEXT"),
         ]:
             if col not in have:
                 c.execute(f"ALTER TABLE listings ADD COLUMN {ddl}")
@@ -119,9 +131,11 @@ def upsert_listings(rows: list[dict]) -> int:
                 old_price = existing["price"]
                 c.execute(
                     "UPDATE listings SET last_seen=?, is_active=1, price=?, km=?, "
-                    "image=?, title=?, year=?, hand=?, gearbox=?, fuel=?, location=? WHERE id=?",
+                    "image=?, title=?, year=?, hand=?, gearbox=?, fuel=?, location=?, "
+                    "notes=?, phone=?, seller_type=? WHERE id=?",
                     (now, price, r.get("km"), r.get("image"), r.get("title"), r.get("year"),
-                     r.get("hand"), r.get("gearbox"), r.get("fuel"), r.get("location"), lid),
+                     r.get("hand"), r.get("gearbox"), r.get("fuel"), r.get("location"),
+                     r.get("notes"), r.get("phone"), r.get("seller_type"), lid),
                 )
                 # Record a history point only when the price actually changed.
                 if price is not None and price != old_price:
@@ -134,14 +148,15 @@ def upsert_listings(rows: list[dict]) -> int:
                 c.execute("""
                     INSERT INTO listings
                       (id, site, url, make, model, year, km, price, hand,
-                       gearbox, fuel, title, location, image,
+                       gearbox, fuel, title, location, image, notes, phone, seller_type,
                        first_seen, last_seen, is_active, seen_by_user)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0)
                 """, (
                     lid, r.get("site"), r.get("url"), r.get("make"),
                     r.get("model"), r.get("year"), r.get("km"), price,
                     r.get("hand"), r.get("gearbox"), r.get("fuel"),
                     r.get("title"), r.get("location"), r.get("image"),
+                    r.get("notes"), r.get("phone"), r.get("seller_type"),
                     now, now,
                 ))
                 if price is not None:
@@ -192,6 +207,29 @@ def record_run(started: float, total: int, new: int, note: str = ""):
             "INSERT INTO runs (started, finished, total, new, note) VALUES (?,?,?,?,?)",
             (started, time.time(), total, new, note),
         )
+
+
+def record_site_run(site: str, ok: bool, count: int, error: str = "", ts: float | None = None):
+    ts = ts or time.time()
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO site_runs (ts, site, ok, count, error) VALUES (?,?,?,?,?)",
+            (ts, site, 1 if ok else 0, count, (error or "")[:300]),
+        )
+
+
+def get_site_status() -> dict:
+    """Per-site: latest run + last time the site actually returned listings."""
+    with _conn() as c:
+        rows = c.execute("SELECT * FROM site_runs ORDER BY ts ASC").fetchall()
+    out: dict = {}
+    for r in rows:
+        s = r["site"]
+        out.setdefault(s, {"last_success": None})
+        out[s].update({"ts": r["ts"], "ok": bool(r["ok"]), "count": r["count"], "error": r["error"]})
+        if r["count"] and r["count"] > 0:
+            out[s]["last_success"] = r["ts"]
+    return out
 
 
 def _history_for(c, listing_id: str) -> list[dict]:
