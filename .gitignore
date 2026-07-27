@@ -5,10 +5,11 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Local database (persisted via the host's volume, not git)
-data/*.db
+# The listings DB is committed so price history persists across daily
+# GitHub Actions runs. Ignore only the transient journal/wal files.
 data/*.db-journal
-data/*.sqlite*
+data/*.db-wal
+data/*.db-shm
 
 # OS / editor
 .DS_Store

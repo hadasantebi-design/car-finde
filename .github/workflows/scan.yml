@@ -1,0 +1,43 @@
+name: Daily car scan
+
+on:
+  schedule:
+    # 05:00 UTC = 08:00 Asia/Jerusalem (summer). GitHub cron is UTC only.
+    - cron: "0 5 * * *"
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+# allow the workflow to commit the refreshed data + DB back to the repo
+permissions:
+  contents: write
+
+concurrency:
+  group: scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run scan and build static bundle
+        run: python build_static.py
+
+      - name: Commit refreshed data
+        run: |
+          git config user.name "car-finder-bot"
+          git config user.email "actions@github.com"
+          git add -f docs/data.json docs/index.html data/listings.db
+          if git diff --staged --quiet; then
+            echo "no changes"
+          else
+            git commit -m "Daily scan: $(date -u +%Y-%m-%d)"
+            git push
+          fi
