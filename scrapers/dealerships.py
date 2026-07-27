@@ -348,15 +348,62 @@ class AutocarAlberScraper(BaseScraper):
         return out
 
 
-class ShlomoSixtScraper(BaseScraper):
-    """Shlomo (shlomo.co.il) — Next.js SSR. Placeholder until the two-level
-    RSC parsing is wired (list of model groups -> per-trim detail pages)."""
+class ShlomoSixtScraper(BrowserScraper):
+    """Shlomo (shlomo.co.il) — Next.js, two-level. We filter to the make via
+    the client-side filter (?manufactures=), collect matching model-group
+    links, then open each group's detail page and read the per-car cards."""
     name = "shlomo_sixt"
     label = "שלמה SIXT"
+    HOST = "https://www.shlomo.co.il"
+    BASE = "https://www.shlomo.co.il/sales/first-hand"
+    MAX_GROUPS = 6
 
     def search(self, spec: SearchSpec) -> list[Listing]:
-        log.info("shlomo_sixt: parser not wired yet — skipping")
-        return []
+        from urllib.parse import quote, unquote
+        out: list[Listing] = []
+        try:
+            lp = self.open(f"{self.BASE}?manufactures={quote(spec.make)}",
+                           wait_selector='a[href*="/sales/first-hand/"]', wait_ms=5000)
+            hrefs = lp.eval_on_selector_all(
+                'a[href*="/sales/first-hand/"]',
+                "els=>[...new Set(els.map(e=>e.getAttribute('href')))]") or []
+            lp.close()
+            groups = []
+            for h in hrefs:
+                if not h or h.count("/") < 4:
+                    continue
+                seg = h.strip("/").split("/")
+                name = unquote(seg[-2]) if len(seg) >= 2 else unquote(h)
+                if self.matches_model(spec, name) and self.matches_fuel(spec, name):
+                    groups.append((h, name))
+            for h, name in groups[:self.MAX_GROUPS]:
+                dp = self.open(self.HOST + h,
+                               wait_selector='[class*="CarCardByPlate_carCard"]', wait_ms=3500)
+                cards = dp.query_selector_all('[class*="CarCardByPlate_carCard"]')
+                for c in cards:
+                    txt = c.inner_text() or ""
+                    plate = re.search(r"מס[׳']?\s*רכב[\s|]*([\d​\-]+)", txt)
+                    plate = re.sub(r"[^\d\-]", "", plate.group(1)) if plate else None
+                    price = re.search(r"מחיר\s*שלמה[\s|]*([\d,]+)", txt)
+                    km = re.search(r"קילומטר[\s|]*([\d,]+)", txt)
+                    year = re.search(r"עליה\s*לכביש[\s|]*\d{2}/(\d{4})", txt)
+                    origin = "ליסינג" if "ליסינג" in txt else ("השכרה" if "השכרה" in txt else "")
+                    lst = Listing(
+                        site=self.name,
+                        url=f"{self.HOST}{h}#{plate}" if plate else self.HOST + h,
+                        make=spec.make, model=spec.model,
+                        year=int(year.group(1)) if year else None,
+                        km=_digits(km.group(1)) if km else None,
+                        price=_digits(price.group(1)) if price else None,
+                        fuel=spec.fuel, title=f"{name} {year.group(1)}".strip() if year else name,
+                        image="", raw={"plate": plate, "origin": origin},
+                    )
+                    if self.passes_filters(lst, spec.filters):
+                        out.append(lst)
+                dp.close()
+        except Exception as e:
+            log.exception("shlomo_sixt scrape failed for %s %s: %s", spec.make, spec.model, e)
+        return out
 
 
 class KalmobilScraper(BrowserScraper):
