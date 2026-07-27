@@ -57,6 +57,11 @@ def run_scan() -> dict:
                 site_count += 1
         per_site[site] = site_count
         log.info("%s -> %d listings", site, site_count)
+        if hasattr(scraper, "close"):
+            try:
+                scraper.close()
+            except Exception:
+                pass
 
     new_count = storage.upsert_listings(all_rows)
     storage.mark_inactive_except(active_ids)

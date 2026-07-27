@@ -240,3 +240,60 @@ class BaseScraper:
             return json.loads(m.group(1))
         except (json.JSONDecodeError, TypeError):
             return {}
+
+
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+
+class BrowserScraper(BaseScraper):
+    """Base for sites that require a real browser (JS-rendered or bot-protected).
+
+    Uses Playwright/Chromium, which runs both locally and in GitHub Actions.
+    A single browser context is launched lazily and reused across the scan's
+    searches; the engine calls ``close()`` when the site is done. Playwright is
+    imported lazily so the requests-only scrapers still work without it.
+    """
+    NEEDS_BROWSER = True
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self._pw = None
+        self._browser = None
+        self._ctx = None
+
+    def _context(self):
+        if self._ctx is None:
+            from playwright.sync_api import sync_playwright
+            self._pw = sync_playwright().start()
+            self._browser = self._pw.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+            )
+            self._ctx = self._browser.new_context(
+                locale="he-IL", user_agent=UA, viewport={"width": 1366, "height": 900}
+            )
+            self._ctx.set_default_timeout(45000)
+        return self._ctx
+
+    def open(self, url: str, wait_selector: str | None = None,
+             wait_ms: int = 2500, settle: str = "domcontentloaded"):
+        """Navigate and return the page (caller must close it)."""
+        page = self._context().new_page()
+        page.goto(url, wait_until=settle, timeout=45000)
+        if wait_selector:
+            try:
+                page.wait_for_selector(wait_selector, timeout=25000)
+            except Exception:
+                pass
+        page.wait_for_timeout(wait_ms)
+        return page
+
+    def close(self):
+        for obj, meth in ((self._browser, "close"), (self._pw, "stop")):
+            try:
+                if obj:
+                    getattr(obj, meth)()
+            except Exception:
+                pass
+        self._pw = self._browser = self._ctx = None

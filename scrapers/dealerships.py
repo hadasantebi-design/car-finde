@@ -29,7 +29,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from .base import BaseScraper, Listing, SearchSpec, MAKE_HEBREW
+from .base import BaseScraper, BrowserScraper, Listing, SearchSpec, MAKE_HEBREW
 
 log = logging.getLogger("scrapers.dealerships")
 
@@ -359,19 +359,118 @@ class ShlomoSixtScraper(BaseScraper):
         return []
 
 
-class KalmobilScraper(DealershipScraper):
-    """Kalmobil = Colmobil (colmobil.co.il). Listings load via a Next.js
-    server-action POST — needs a browser/Playwright. Deferred."""
+class KalmobilScraper(BrowserScraper):
+    """Kalmobil = Colmobil (colmobil.co.il). Listings render client-side via a
+    Next.js server action, so we drive a headless browser, filter by brand
+    (+ engine) in the URL, and parse the rendered cards."""
     name = "kalmobil"
     label = "כלמוביל"
-    NEEDS_BROWSER = True
-    SEARCH_URL = ""
+    BASE = "https://www.colmobil.co.il/trade/cars/"
+    FUEL_EN = {"hybrid": "hybrid", "plugin_hybrid": "hybrid", "electric": "electric",
+               "gasoline": "gasoline", "diesel": "diesel"}
+
+    def search(self, spec: SearchSpec) -> list[Listing]:
+        from urllib.parse import urlencode
+        params = {"brand": spec.make}
+        eng = self.FUEL_EN.get(spec.fuel)
+        if eng:
+            params["engine"] = eng
+        url = self.BASE + "?" + urlencode(params)
+        out: list[Listing] = []
+        try:
+            page = self.open(url, wait_selector='[class*="StyledCarCard"]', wait_ms=2500)
+            cards = page.query_selector_all('[class*="StyledCarCard"]')
+            for c in cards:
+                txt = c.inner_text() or ""
+                if not self.matches_model(spec, txt):
+                    continue
+                a = c.query_selector('a[href^="/trade/cars/"]')
+                href = a.get_attribute("href") if a else None
+                abs_url = ("https://www.colmobil.co.il" + href) if href and href.startswith("/") else (href or url)
+                parts = [p.strip() for p in re.split(r"[\n|]", txt)]
+                model_part = next((p for p in parts if p and not re.search(r'[\d₪]|צרו|להשוואה|לחודש|השווא', p)), "")
+                if not model_part:
+                    model_part = f"{spec.make} {spec.model}"
+                year = re.search(r"שנה\s*(\d{4})", txt)
+                hand = re.search(r"יד\s*0*(\d+)", txt)
+                km = re.search(r"([\d,]+)\s*ק", txt)
+                price = re.search(r"₪\s*([\d,]+)", txt)
+                lst = Listing(
+                    site=self.name, url=abs_url, make=spec.make, model=spec.model,
+                    year=int(year.group(1)) if year else None,
+                    km=_digits(km.group(1)) if km else None,
+                    price=_digits(price.group(1)) if price else None,
+                    hand=int(hand.group(1)) if hand else None,
+                    fuel=spec.fuel,
+                    title=f"{model_part} {year.group(1)}".strip() if year else (model_part or f"{spec.make} {spec.model}"),
+                    image="", raw={},
+                )
+                if self.passes_filters(lst, spec.filters):
+                    out.append(lst)
+            page.close()
+        except Exception as e:
+            log.exception("kalmobil scrape failed for %s: %s", spec.make, e)
+        return out
 
 
-class AutoCenterScraper(DealershipScraper):
-    """Auto Center (autocenter.co.il). GraphQL API behind a Cloudflare WAF —
-    needs a browser/Playwright or a TLS-spoofing client. Deferred."""
+class AutoCenterScraper(BrowserScraper):
+    """Auto Center (autocenter.co.il). Behind a Cloudflare WAF, but a headless
+    browser passes it; we then call the site's Magento GraphQL product-search
+    from inside the page (so it inherits the Cloudflare clearance)."""
     name = "auto_center"
     label = "אוטו סנטר"
-    NEEDS_BROWSER = True
-    SEARCH_URL = ""
+    HOME = "https://www.autocenter.co.il/cars.html"
+    _GQL = ('{products(search:"%s" pageSize:60){items{name sku url_key '
+            '... on SimpleProduct{year km manufacturer_name} '
+            'price_range{maximum_price{final_price{value}}}}}}')
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self._ready = None
+
+    def _ready_page(self):
+        if self._ready is None:
+            self._ready = self.open(self.HOME, wait_selector='[class^="item-root-"]', wait_ms=800)
+        return self._ready
+
+    def search(self, spec: SearchSpec) -> list[Listing]:
+        # search by a Hebrew model alias when we have one (Magento search is Hebrew)
+        term = next((a for a in self.model_aliases_for(spec.model) if any(ord(ch) > 127 for ch in a)), spec.model)
+        out: list[Listing] = []
+        try:
+            pg = self._ready_page()
+            q = self._GQL % term.replace('"', '')
+            items = pg.evaluate(
+                "async(q)=>{try{const r=await fetch('/graphql?query='+encodeURIComponent(q));"
+                "const j=await r.json();return (j.data&&j.data.products&&j.data.products.items)||[];}"
+                "catch(e){return [];}}", q,
+            ) or []
+            for it in items:
+                name = it.get("name") or ""
+                if not self.matches_make(spec, it.get("manufacturer_name") or "", name):
+                    continue
+                if not self.matches_model(spec, name):
+                    continue
+                if not self.matches_fuel(spec, name):
+                    continue
+                key = it.get("url_key") or it.get("sku")
+                price = (((it.get("price_range") or {}).get("maximum_price") or {}).get("final_price") or {}).get("value")
+                lst = Listing(
+                    site=self.name,
+                    url=f"https://www.autocenter.co.il/{key}.html" if key else self.HOME,
+                    make=spec.make, model=spec.model,
+                    year=it.get("year"), km=it.get("km"),
+                    price=int(price) if price else None,
+                    fuel=spec.fuel, title=name.strip() or f"{spec.make} {spec.model}",
+                    image="", raw={"sku": it.get("sku")},
+                )
+                if self.passes_filters(lst, spec.filters):
+                    out.append(lst)
+        except Exception as e:
+            log.exception("auto_center scrape failed for %s: %s", spec.model, e)
+        return out
+
+    @staticmethod
+    def model_aliases_for(model):
+        from .base import model_aliases
+        return model_aliases(model)

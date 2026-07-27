@@ -71,8 +71,8 @@ const S = {
 
 // site status (which sources are live vs need a browser vs coming soon)
 const SITE_STATUS = {
-  eldan:'active', autocar_alber:'active',
-  shlomo_sixt:'soon', yad2:'browser', kalmobil:'browser', auto_center:'browser',
+  eldan:'active', autocar_alber:'active', kalmobil:'active', auto_center:'active',
+  shlomo_sixt:'soon', yad2:'blocked',
 };
 const FUEL_HE = {hybrid:'היברידי',plugin_hybrid:'פלאגאין',electric:'חשמלי',gasoline:'בנזין',diesel:'דיזל',any:'הכול'};
 const FUEL_KEY = {'היברידי':'hybrid','פלאגאין':'plugin_hybrid','פלאג אין':'plugin_hybrid','חשמלי':'electric','בנזין':'gasoline','דיזל':'diesel','הכול':'any'};
@@ -437,7 +437,7 @@ function viewTrends(){
 
 function viewSettings(){
   const f=S.filters;
-  const statusMap={active:['פעיל','var(--good)','rgba(23,199,126,.15)'],browser:['דורש דפדפן','var(--rd-yellow-06)','rgba(220,255,30,.12)'],soon:['בקרוב','var(--fg-subtle)','var(--bg-sunken)'],unavailable:['לא זמין','var(--fg-subtle)','var(--bg-sunken)']};
+  const statusMap={active:['פעיל','var(--good)','rgba(23,199,126,.15)'],browser:['דורש דפדפן','var(--rd-yellow-06)','rgba(220,255,30,.12)'],soon:['בקרוב','var(--fg-subtle)','var(--bg-sunken)'],blocked:['חסום','var(--rd-hyper-03)','var(--rd-hyper-10)'],unavailable:['לא זמין','var(--fg-subtle)','var(--bg-sunken)']};
   const allSites=Object.keys(S.siteLabels);
   const regions=['מרכז','שרון','ירושלים','שפלה','דרום','צפון'];
   const tgl=on=>`background:${on?'var(--brand)':'transparent'};color:${on?'#fff':'var(--fg-muted)'};border:1px solid ${on?'var(--brand)':'var(--border)'}`;
