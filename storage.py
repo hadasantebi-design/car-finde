@@ -118,8 +118,10 @@ def upsert_listings(rows: list[dict]) -> int:
             if existing:
                 old_price = existing["price"]
                 c.execute(
-                    "UPDATE listings SET last_seen=?, is_active=1, price=?, km=? WHERE id=?",
-                    (now, price, r.get("km"), lid),
+                    "UPDATE listings SET last_seen=?, is_active=1, price=?, km=?, "
+                    "image=?, title=?, year=?, hand=?, gearbox=?, fuel=?, location=? WHERE id=?",
+                    (now, price, r.get("km"), r.get("image"), r.get("title"), r.get("year"),
+                     r.get("hand"), r.get("gearbox"), r.get("fuel"), r.get("location"), lid),
                 )
                 # Record a history point only when the price actually changed.
                 if price is not None and price != old_price:

@@ -17,14 +17,50 @@ import requests
 
 log = logging.getLogger("scrapers")
 
-# Cross-site make/model aliases. Sites use Hebrew and/or English names with
-# different spellings; we match loosely (case-insensitive substring) against
-# any alias so one config entry ("Kia"/"Niro") works everywhere.
-MAKE_ALIASES = {
-    "kia": ["kia", "קיה", "קאיה"],
-    "hyundai": ["hyundai", "יונדאי"],
-    "toyota": ["toyota", "טויוטה"],
-}
+# Cross-site make catalog. Each entry: (English canonical, primary Hebrew name,
+# [extra spelling aliases]). Sites use Hebrew and/or English with inconsistent
+# gereshim/spacing, so matching is normalized (see _norm) and checks every
+# alias. The English canonical is what the UI/config store.
+MAKES = [
+    ("Toyota", "טויוטה", []),
+    ("Hyundai", "יונדאי", []),
+    ("Kia", "קיה", ["קאיה"]),
+    ("Mazda", "מאזדה", []),
+    ("Honda", "הונדה", []),
+    ("Nissan", "ניסאן", []),
+    ("Mitsubishi", "מיצובישי", []),
+    ("Suzuki", "סוזוקי", []),
+    ("Subaru", "סובארו", []),
+    ("Skoda", "סקודה", ["שקודה"]),
+    ("Volkswagen", "פולקסווגן", ["vw"]),
+    ("Seat", "סיאט", []),
+    ("Renault", "רנו", []),
+    ("Peugeot", "פיגו", ["פיזו", "peugeot"]),
+    ("Citroen", "סיטרואן", []),
+    ("Opel", "אופל", []),
+    ("Ford", "פורד", []),
+    ("Chevrolet", "שברולט", []),
+    ("MG", "אם ג'י", ["mg"]),
+    ("Chery", "צ'רי", ["chery"]),
+    ("Geely", "ג'ילי", ["geely"]),
+    ("BYD", "בי.וויי.די", ["byd"]),
+    ("Tesla", "טסלה", []),
+    ("Volvo", "וולוו", []),
+    ("Mercedes", "מרצדס", ["mercedes-benz", "מרצדס בנץ"]),
+    ("BMW", "ב.מ.וו", ["bmw", "במוו"]),
+    ("Audi", "אאודי", []),
+    ("Jeep", "ג'יפ", ["jeep"]),
+    ("Dacia", "דאצ'יה", []),
+    ("Fiat", "פיאט", []),
+    ("Mini", "מיני", []),
+    ("Genesis", "ג'נסיס", ["genesis"]),
+    ("Lexus", "לקסוס", []),
+    ("Isuzu", "איסוזו", []),
+    ("Land Rover", "לנד רובר", ["landrover"]),
+]
+MAKE_ALIASES = {en.lower(): [en.lower(), he, *extra] for en, he, extra in MAKES}
+MAKE_HEBREW = {en.lower(): he for en, he, _ in MAKES}
+
 MODEL_ALIASES = {
     "niro": ["niro", "נירו"],
     "elantra": ["elantra", "lantra", "אלנטרה", "לנטרה"],
@@ -40,9 +76,15 @@ def model_aliases(model: str) -> list[str]:
     return MODEL_ALIASES.get((model or "").strip().lower(), [(model or "").strip().lower()])
 
 
+def _norm(s: str) -> str:
+    """Lowercase and strip spacing/punctuation/gereshim so spelling variants
+    like פיג'ו / פיגו / "פי ג'ו" all compare equal."""
+    return re.sub(r"[\s'`׳״\".\-_]", "", (s or "").lower())
+
+
 def _contains_any(text: str, needles: list[str]) -> bool:
-    t = (text or "").lower()
-    return any(n and n in t for n in needles)
+    t = _norm(text)
+    return any(n and _norm(n) in t for n in needles)
 
 
 @dataclass

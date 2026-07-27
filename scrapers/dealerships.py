@@ -29,7 +29,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from .base import BaseScraper, Listing, SearchSpec
+from .base import BaseScraper, Listing, SearchSpec, MAKE_HEBREW
 
 log = logging.getLogger("scrapers.dealerships")
 
@@ -233,6 +233,9 @@ class EldanScraper(BaseScraper):
                 url = f"https://www.eldan.co.il/search/firsthand/{car_no}/{slug}"
             else:
                 url = self.LIST_URL
+            imgs = it.get("images") or []
+            img_url = (it.get("mainImage") or (imgs[0].get("url") if imgs else "")) or ""
+            img_url = img_url.replace(" ", "%20")  # Eldan CDN paths contain spaces
             lst = Listing(
                 site=self.name,
                 url=url,
@@ -243,7 +246,7 @@ class EldanScraper(BaseScraper):
                 price=it.get("price"),
                 fuel=spec.fuel,
                 title=it.get("carDisplayName") or f"{make_he} {model}",
-                image=it.get("mainImage") or "",
+                image=img_url,
                 raw={"carNumber": car_no},
             )
             if self.passes_filters(lst, spec.filters):
@@ -264,8 +267,8 @@ class AutocarAlberScraper(BaseScraper):
     BASE = "https://www.albar.co.il/חיפוש-רכבים-חדש/"
     PAGE = "https://www.albar.co.il/umbraco/Surface/Cars/Results?index={index}"
     MAX_PAGES = 20
-    # Hebrew manufacturer names as Albar spells them (Kia = קאיה, not קיה).
-    MAKE_HE = {"kia": "קאיה", "hyundai": "יונדאי", "toyota": "טויוטה"}
+    # Hebrew manufacturer names for Albar's search URL. Albar spells Kia קאיה.
+    MAKE_HE = {**MAKE_HEBREW, "kia": "קאיה"}
     FUEL_HE = {"hybrid": "היברידי", "plugin_hybrid": "היברידי פלאג אין",
                "electric": "חשמלי", "gasoline": "רגיל"}
 

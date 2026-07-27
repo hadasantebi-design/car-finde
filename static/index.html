@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>מאתר הרכבים שלי</title>
+<title>גולי תמצא לי רכב</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2288%22>🚗</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&family=Secular+One&display=swap" rel="stylesheet">
@@ -78,6 +79,19 @@ const FUEL_KEY = {'היברידי':'hybrid','פלאגאין':'plugin_hybrid','פ
 const GEAR_HE = {automatic:'אוטומט',manual:'ידני',any:'הכול'};
 const GEAR_KEY = {'אוטומט':'automatic','ידני':'manual','הכול':'any'};
 const MODEL_HE = {'Kia Niro':'קיה נירו','Hyundai Elantra':'יונדאי אלנטרה','Toyota Corolla':'טויוטה קורולה'};
+// value = English canonical (what config stores), label = Hebrew (kept in sync with scrapers/base.py MAKES)
+const MANUFACTURERS = [["Toyota","טויוטה"],["Hyundai","יונדאי"],["Kia","קיה"],["Mazda","מאזדה"],["Honda","הונדה"],["Nissan","ניסאן"],["Mitsubishi","מיצובישי"],["Suzuki","סוזוקי"],["Subaru","סובארו"],["Skoda","סקודה"],["Volkswagen","פולקסווגן"],["Seat","סיאט"],["Renault","רנו"],["Peugeot","פיג'ו"],["Citroen","סיטרואן"],["Opel","אופל"],["Ford","פורד"],["Chevrolet","שברולט"],["MG","MG"],["Chery","צ'רי"],["Geely","ג'ילי"],["BYD","BYD"],["Tesla","טסלה"],["Volvo","וולוו"],["Mercedes","מרצדס"],["BMW","ב.מ.וו"],["Audi","אאודי"],["Jeep","ג'יפ"],["Dacia","דאצ'יה"],["Fiat","פיאט"],["Mini","מיני"],["Genesis","ג'נסיס"],["Lexus","לקסוס"],["Isuzu","איסוזו"],["Land Rover","לנד רובר"]];
+const YEARS = (()=>{ const a=[]; for(let y=2026;y>=2008;y--) a.push(y); return a; })();
+const KM_STEPS = [10000,20000,30000,40000,50000,60000,75000,100000,125000,150000,200000];
+// each: [keyword to search in listing text, label shown to the user]
+const REDFLAG_KEYS = [['תאונה','אזכור תאונה'],['נזק','אזכור נזק'],['אובדן','אובדן להלכה'],['ווסט','Write-off'],['שלדה','נזק שלדה'],['שיטפון','הצפה/שיטפון'],['הצפ','הצפה'],['ריתוך','ריתוך'],['מנוע חדש','מנוע הוחלף'],['גיר חדש','גיר הוחלף'],['השכרה','לשעבר רכב השכרה'],['ליסינג','לשעבר ליסינג'],['leasing','לשעבר ליסינג'],['rental','לשעבר השכרה']];
+function redFlags(c){
+  const flags=[]; const text=`${c.title||''} ${c.notes||''}`.toLowerCase();
+  REDFLAG_KEYS.forEach(([kw,label])=>{ if(text.includes(kw.toLowerCase()) && !flags.includes(label)) flags.push(label); });
+  if(c.km!=null && c.km>150000) flags.push('ק״מ גבוה');
+  if(c.hand!=null && c.hand>=4) flags.push('ריבוי בעלים');
+  return flags;
+}
 
 // ---------- helpers ----------
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -233,9 +247,9 @@ function setInput(key,val){
 function addModel(){
   const mk=($app.querySelector('[data-input="nm:make"]')||{}).value||'';
   const md=($app.querySelector('[data-input="nm:model"]')||{}).value||'';
-  const en=($app.querySelector('[data-input="nm:engine"]')||{}).value||'';
+  const fu=($app.querySelector('[data-input="nm:engine"]')||{}).value||'any';
   if(!mk.trim()||!md.trim()) return;
-  S.models.push({make:mk.trim(),model:md.trim(),fuel:FUEL_KEY[en.trim()]||'any'});
+  S.models.push({make:mk.trim(),model:md.trim(),fuel:fu||'any'});
   render();
 }
 function removeModel(i){ S.models.splice(i,1); render(); }
@@ -271,6 +285,7 @@ function cardHtml(c){
       <div style="position:absolute;top:10px;inset-inline-start:10px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none">
         ${c.isNew?`<span style="background:var(--rd-yellow-05);color:#091A23;font-size:11px;font-weight:800;padding:3px 8px;border-radius:var(--rd-radius-sm)">חדש</span>`:''}
         ${c.dir==='down'?`<span style="background:var(--good);color:#04231a;font-size:11px;font-weight:800;padding:3px 8px;border-radius:var(--rd-radius-sm)">ירידת מחיר</span>`:''}
+        ${redFlags(c).length?`<span style="background:var(--bad);color:#fff;font-size:11px;font-weight:800;padding:3px 8px;border-radius:var(--rd-radius-sm)">⚠ דגל אדום</span>`:''}
       </div>
       <button data-act="fav:${c.id}" data-stop aria-label="הוסף למועדפים" style="position:absolute;top:8px;inset-inline-end:8px;width:36px;height:36px;border-radius:50%;border:none;background:rgba(9,26,23,.6);backdrop-filter:blur(4px);color:${c.fav?'var(--brand)':'#fff'};font-size:18px;display:flex;align-items:center;justify-content:center;line-height:1">${c.fav?'♥':'♡'}</button>
       <span style="position:absolute;bottom:8px;inset-inline-end:8px;background:rgba(9,26,23,.72);color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:var(--rd-radius-sm)">${esc(siteName(c.site))}</span>
@@ -299,7 +314,7 @@ function cardHtml(c){
 }
 
 // ---------- views ----------
-const statCard=(label,val,color)=>`<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:14px 16px"><div style="font-size:12px;color:var(--fg-muted)">${label}</div><div style="font-size:26px;font-weight:700;${color?'color:'+color:''}">${val}</div></div>`;
+const statCard=(label,val,color,act,on)=>`<div ${act?`data-act="${act}"`:''} style="background:var(--bg-elev);border:1px solid ${on?'var(--brand)':'var(--border)'};border-radius:var(--rd-radius-lg);padding:14px 16px;${act?'cursor:pointer':''}"><div style="font-size:12px;color:var(--fg-muted);display:flex;align-items:center;gap:6px">${label}${on?`<span style="color:var(--brand)">●</span>`:''}</div><div style="font-size:26px;font-weight:700;${color?'color:'+color:''}">${val}</div></div>`;
 function selectHtml(key,val,opts){ return `<div style="position:relative"><select data-select="${key}" style="appearance:none;background:var(--bg-elev);color:var(--fg);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:9px 34px 9px 12px;font-size:13px;font-weight:600">${opts.map(([id,label])=>`<option value="${esc(id)}" ${id==val?'selected':''}>${esc(label)}</option>`).join('')}</select><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--fg-muted);font-size:11px">▼</span></div>`; }
 function skeletons(){ const one=`<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);overflow:hidden"><div style="aspect-ratio:16/10;background:linear-gradient(90deg,var(--bg-sunken) 25%,var(--rd-dusk-08) 50%,var(--bg-sunken) 75%);background-size:200% 100%;animation:rdshimmer 1.4s infinite"></div><div style="padding:14px;display:flex;flex-direction:column;gap:12px"><div style="height:16px;width:70%;border-radius:4px;background:linear-gradient(90deg,var(--bg-sunken) 25%,var(--rd-dusk-08) 50%,var(--bg-sunken) 75%);background-size:200% 100%;animation:rdshimmer 1.4s infinite"></div><div style="height:24px;width:45%;border-radius:4px;background:linear-gradient(90deg,var(--bg-sunken) 25%,var(--rd-dusk-08) 50%,var(--bg-sunken) 75%);background-size:200% 100%;animation:rdshimmer 1.4s infinite"></div></div></div>`; return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">${one.repeat(6)}</div>`; }
 function emptyResults(){ return `<div style="text-align:center;padding:64px 24px;border:1px dashed var(--border);border-radius:var(--rd-radius-lg);background:var(--bg-sunken)"><div style="font-size:44px;margin-bottom:12px">🔍</div><div style="font-size:20px;font-weight:700;margin-bottom:6px">אין רכבים שתואמים לסינון</div><div style="font-size:14px;color:var(--fg-muted);max-width:360px;margin:0 auto 18px">נסי לנקות את המסננים או להריץ סריקה חדשה כדי למשוך מודעות עדכניות.</div><button data-act="clearfilters" style="background:var(--action);color:var(--action-fg);border:none;padding:10px 20px;border-radius:var(--rd-radius-md);font-weight:700;font-size:14px">נקה מסננים</button></div>`; }
@@ -317,17 +332,17 @@ function viewResults(){
   const sortOpts=[['newest','החדשים ביותר'],['price','מחיר (נמוך לגבוה)'],['km','קילומטראז׳'],['year','שנתון (חדש לישן)'],['drop','ירידת המחיר הגדולה']];
   return `<div style="display:flex;flex-direction:column;gap:16px;animation:rdup .3s var(--rd-ease-out)">
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
-      ${statCard('רכבים פעילים',active.length)}
-      <div style="background:var(--bg-elev);border:1px solid var(--brand);border-radius:var(--rd-radius-lg);padding:14px 16px;position:relative;overflow:hidden">
+      ${statCard('רכבים פעילים',active.length,null,'clearfilters',false)}
+      <div data-act="tgl:newOnly" style="background:var(--bg-elev);border:1px solid var(--brand);border-radius:var(--rd-radius-lg);padding:14px 16px;position:relative;overflow:hidden;cursor:pointer">
         <div style="position:absolute;inset:0;background:radial-gradient(120% 120% at 100% 0,rgba(236,72,153,.18),transparent 60%);pointer-events:none"></div>
-        <div style="font-size:12px;color:var(--brand-soft);position:relative">חדשים שלא נצפו</div>
+        <div style="font-size:12px;color:var(--brand-soft);position:relative">חדשים שלא נצפו${S.newOnly?' ●':''}</div>
         <div style="display:flex;align-items:center;gap:10px;position:relative">
           <div style="font-size:26px;font-weight:700;color:var(--brand-mid)">${unseen}</div>
-          ${unseen?`<button data-act="markseen" style="background:transparent;border:1px solid var(--brand);color:var(--brand-soft);font-size:11px;font-weight:600;padding:4px 10px;border-radius:var(--rd-radius-pill)">סמן הכל כנצפה</button>`:''}
+          ${unseen?`<button data-act="markseen" data-stop style="background:transparent;border:1px solid var(--brand);color:var(--brand-soft);font-size:11px;font-weight:600;padding:4px 10px;border-radius:var(--rd-radius-pill)">סמן הכל כנצפה</button>`:''}
         </div>
       </div>
-      ${statCard('מועדפים',favs)}
-      ${statCard('ירידות מחיר',drops,'var(--good)')}
+      ${statCard('מועדפים',favs,null,'tgl:favOnly',S.favOnly)}
+      ${statCard('ירידות מחיר',drops,'var(--good)','tgl:dropOnly',S.dropOnly)}
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
       ${selectHtml('site',S.site,siteOpts)}
@@ -379,6 +394,7 @@ function favCardHtml(c){
 }
 
 function selHtml(key,val,opts){ return `<select data-select="${key}" style="width:100%;appearance:none;background:var(--bg-sunken);color:var(--fg);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">${opts.map(([id,label])=>`<option value="${esc(id)}" ${String(id)==String(val)?'selected':''}>${esc(label)}</option>`).join('')}</select>`; }
+function numSelect(key,val,opts){ return `<select data-select="filter:${key}" style="width:100%;appearance:none;background:var(--bg-sunken);color:var(--fg);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px"><option value="">הכל</option>${opts.map(o=>`<option value="${o}" ${String(o)===String(val)?'selected':''}>${Number(o).toLocaleString('en-US')}</option>`).join('')}</select>`; }
 
 function viewTrends(){
   const rangeChips=[[7,'7 ימים'],[30,'30 יום'],[90,'90 יום'],[9999,'הכול']];
@@ -423,28 +439,29 @@ function viewSettings(){
   const f=S.filters;
   const statusMap={active:['פעיל','var(--good)','rgba(23,199,126,.15)'],browser:['דורש דפדפן','var(--rd-yellow-06)','rgba(220,255,30,.12)'],soon:['בקרוב','var(--fg-subtle)','var(--bg-sunken)'],unavailable:['לא זמין','var(--fg-subtle)','var(--bg-sunken)']};
   const allSites=Object.keys(S.siteLabels);
-  const rangeFields=[['שנתון','yearFrom','yearTo'],['קילומטראז׳','kmFrom','kmTo'],['מחיר (₪)','priceFrom','priceTo']];
   const regions=['מרכז','שרון','ירושלים','שפלה','דרום','צפון'];
   const tgl=on=>`background:${on?'var(--brand)':'transparent'};color:${on?'#fff':'var(--fg-muted)'};border:1px solid ${on?'var(--brand)':'var(--border)'}`;
   return `<div style="display:flex;flex-direction:column;gap:20px;max-width:760px;animation:rdup .3s var(--rd-ease-out)">
-    <h1 style="font-family:var(--font-head);font-size:26px;font-weight:400;margin:0">הגדרות</h1>
+    <div style="display:flex;align-items:center;gap:12px"><button data-act="nav:results" aria-label="חזרה לתוצאות" style="width:38px;height:38px;flex:none;border-radius:var(--rd-radius-md);border:1px solid var(--border);background:var(--bg-elev);color:var(--fg);font-size:20px">→</button><h1 style="font-family:var(--font-head);font-size:26px;font-weight:400;margin:0">הגדרות</h1></div>
     <section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:20px">
       <div style="font-family:var(--font-head);font-size:16px;margin-bottom:4px">דגמים לחיפוש</div>
       <div style="font-size:13px;color:var(--fg-muted);margin-bottom:14px">יצרן, דגם וסוג מנוע. אפשר להוסיף ולהסיר.</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
         ${S.models.map((m,i)=>`<div style="display:flex;align-items:center;gap:10px;background:var(--bg-sunken);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:10px 14px"><span style="font-weight:600;font-size:15px">${esc(m.make)} ${esc(m.model)}</span><span style="background:var(--bg-elev);border:1px solid var(--border);color:var(--fg-muted);font-size:11px;padding:2px 8px;border-radius:var(--rd-radius-pill)">${esc(FUEL_HE[m.fuel]||m.fuel)}</span><button class="rmbtn" data-act="rmmodel:${i}" aria-label="הסר דגם" style="margin-inline-start:auto;background:transparent;border:1px solid var(--border);color:var(--fg-muted);width:28px;height:28px;border-radius:var(--rd-radius-sm);font-size:15px">✕</button></div>`).join('')}
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input data-input="nm:make" placeholder="יצרן (למשל Kia)" style="flex:1;min-width:100px;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">
-        <input data-input="nm:model" placeholder="דגם (למשל Niro)" style="flex:1;min-width:100px;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">
-        <input data-input="nm:engine" placeholder="מנוע (היברידי)" style="width:130px;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select data-input="nm:make" style="flex:1;min-width:120px;appearance:none;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">${MANUFACTURERS.map(([en,he])=>`<option value="${en}">${esc(he)}</option>`).join('')}</select>
+        <input data-input="nm:model" placeholder="דגם (למשל Niro)" style="flex:1;min-width:120px;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">
+        <select data-input="nm:engine" style="width:140px;appearance:none;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">${['any','hybrid','plugin_hybrid','electric','gasoline','diesel'].map(k=>`<option value="${k}">${FUEL_HE[k]}</option>`).join('')}</select>
         <button data-act="addmodel" style="background:var(--rd-dusk-08);color:var(--fg);border:1px solid var(--border-strong);border-radius:var(--rd-radius-md);padding:9px 16px;font-weight:700;font-size:14px">הוסף</button>
       </div>
     </section>
     <section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:20px">
       <div style="font-family:var(--font-head);font-size:16px;margin-bottom:14px">מסננים גלובליים</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
-        ${rangeFields.map(([label,kf,kt])=>`<div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">${label}</div><div style="display:flex;align-items:center;gap:8px"><input data-input="filter:${kf}" value="${esc(f[kf])}" placeholder="מ־" style="width:100%;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px"><span style="color:var(--fg-subtle)">–</span><input data-input="filter:${kt}" value="${esc(f[kt])}" placeholder="עד" style="width:100%;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px"></div></div>`).join('')}
+        <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">שנתון</div><div style="display:flex;align-items:center;gap:8px">${numSelect('yearFrom',f.yearFrom,YEARS)}<span style="color:var(--fg-subtle)">–</span>${numSelect('yearTo',f.yearTo,YEARS)}</div></div>
+        <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">קילומטראז׳</div><div style="display:flex;align-items:center;gap:8px">${numSelect('kmFrom',f.kmFrom,KM_STEPS)}<span style="color:var(--fg-subtle)">–</span>${numSelect('kmTo',f.kmTo,KM_STEPS)}</div></div>
+        <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">מחיר (₪)</div><div style="display:flex;align-items:center;gap:8px"><input data-input="filter:priceFrom" value="${esc(f.priceFrom)}" placeholder="מ־" style="width:100%;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px"><span style="color:var(--fg-subtle)">–</span><input data-input="filter:priceTo" value="${esc(f.priceTo)}" placeholder="עד" style="width:100%;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px"></div></div>
         <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">יד מקסימלית</div>${selHtml('maxHand',f.maxHand,[['1','יד ראשונה'],['2','עד יד שנייה'],['3','עד יד שלישית'],['9','ללא הגבלה']])}</div>
         <div><div style="font-size:12px;color:var(--fg-muted);margin-bottom:6px">תיבת הילוכים</div>${selHtml('gearbox',f.gearbox,[['any','הכול'],['automatic','אוטומט'],['manual','ידני']])}</div>
       </div>
@@ -493,6 +510,7 @@ function drawerHtml(){
           <div style="display:flex;align-items:center;gap:10px;margin-top:8px"><span style="font-size:28px;font-weight:700">${fmtP(c.price)}</span><span style="color:${color};font-weight:700;font-size:15px">${arrow} ${totalChange}</span></div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:8px">${chip(c.km!=null?c.km.toLocaleString('en-US')+' ק״מ':'—')}${chip(c.hand!=null?'יד '+c.hand:'—')}${chip(c.gearbox||'—')}${chip(c.region||'—')}${chip('שנתון '+(c.year||'—'))}</div>
+        ${(function(){const rf=redFlags(c);return rf.length?`<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:var(--rd-radius-md);background:var(--rd-hyper-10);border:1px solid var(--rd-hyper-08)"><span style="font-size:16px">⚠︎</span><div><div style="font-size:13px;font-weight:700;color:var(--rd-hyper-03);margin-bottom:4px">דגלים אדומים לבדיקה</div><div style="font-size:12px;color:var(--fg-muted)">${rf.map(esc).join(' · ')}</div></div></div>`:'';})()}
         <div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:18px">
           <div style="display:flex;justify-content:space-between;margin-bottom:16px">
             <div><div style="font-size:11px;color:var(--fg-subtle)">מחיר ראשוני</div><div style="font-size:16px;font-weight:700;color:var(--fg-muted)">${fmtP(c.start)}</div></div>
@@ -516,7 +534,7 @@ function drawerHtml(){
 function navItems(){
   const unseen=S.cars.filter(c=>c.avail&&c.isNew).length;
   const favs=S.cars.filter(c=>c.fav).length;
-  return [['results','תוצאות',unseen],['favorites','מועדפים',favs],['trends','מגמות',0],['settings','הגדרות',0]];
+  return [['results','תוצאות',unseen],['favorites','מועדפים',favs],['trends','מגמות',0]];
 }
 function render(){
   const scanLabel=STATIC?(S.scanning?'מרענן…':'רענן'):(S.scanning?'סורק…':(S.isMobile?'סרוק':'סרוק עכשיו'));
@@ -532,11 +550,12 @@ function render(){
   $app.innerHTML=`
     <header style="position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)">
       <div style="max-width:1280px;margin:0 auto;padding:0 16px;height:64px;display:flex;align-items:center;gap:16px;justify-content:space-between">
-        <span style="font-family:var(--font-head);font-size:22px;white-space:nowrap">🚗 מאתר הרכבים שלי</span>
+        <button data-act="nav:results" aria-label="לדף התוצאות" style="background:transparent;border:none;padding:0;font-family:var(--font-head);font-size:22px;white-space:nowrap;color:var(--fg);cursor:pointer">🚗 גולי תמצא לי רכב</button>
         ${S.isMobile?'':desktopNav}
         <div style="display:flex;align-items:center;gap:12px">
           ${S.isMobile?'':`<span style="font-size:12px;color:var(--fg-muted);white-space:nowrap">סריקה אחרונה: ${relTime(S.lastScan)}</span>`}
           <button class="scanbtn" data-act="scan" ${S.scanning?'disabled':''} style="display:flex;align-items:center;gap:8px;background:#EC4899;color:#fff;border:none;padding:0 18px;height:42px;border-radius:var(--rd-radius-md);font-weight:700;font-size:14px;white-space:nowrap;opacity:${S.scanning?'0.85':'1'}">${S.scanning?`<span style="width:15px;height:15px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:rdspin .7s linear infinite"></span>`:''}<span>${scanLabel}</span></button>
+          <button data-act="nav:settings" aria-label="הגדרות" title="הגדרות" style="width:42px;height:42px;flex:none;border-radius:var(--rd-radius-md);border:1px solid ${S.screen==='settings'?'var(--brand)':'var(--border)'};background:var(--bg-elev);color:var(--fg);font-size:18px;display:flex;align-items:center;justify-content:center">⚙️</button>
         </div>
       </div>
     </header>
@@ -574,6 +593,7 @@ $app.addEventListener('change',e=>{
   const sel=e.target.closest('[data-select]'); if(!sel) return;
   const k=sel.getAttribute('data-select'); const v=sel.value;
   if(k==='site'){S.site=v;render();} else if(k==='sort'){S.sort=v;render();}
+  else if(k.startsWith('filter:')){ S.filters[k.slice(7)]=v; }
   else if(k==='maxHand'){S.filters.maxHand=v;} else if(k==='gearbox'){S.filters.gearbox=v;}
   else if(k==='tz'){S.sched.tz=v;}
 });
