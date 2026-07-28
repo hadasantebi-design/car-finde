@@ -275,6 +275,14 @@ function hideListing(id){ HIDDEN.add(id); lsSet('hidden',[...HIDDEN]); S.undoHid
 function unhide(id){ if(!id) return; HIDDEN.delete(id); lsSet('hidden',[...HIDDEN]); S.undoHide=null; render(); }
 function setExclude(text){ EXCLUDE=(text||'').split(/[\n,]/).map(w=>w.trim().toLowerCase()).filter(Boolean); lsSet('exclude',EXCLUDE); }
 function shareListing(id){ const c=S.cars.find(x=>x.id===id); if(!c) return; const text=`${c.title} · ${fmtP(c.price)}\n${c.url}`; if(navigator.share){ navigator.share({title:c.title,text,url:c.url}).catch(()=>{}); } else { window.open('https://wa.me/?text='+encodeURIComponent(text),'_blank'); } }
+function exportFavs(){
+  const rows=S.cars.filter(c=>c.fav); if(!rows.length) return;
+  const q=x=>`"${String(x==null?'':x).replace(/"/g,'""')}"`;
+  const head=['דגם','שנתון','ק"מ','מחיר','יד','אתר','סטטוס','הערה','קישור'];
+  const lines=[head.map(q).join(',')].concat(rows.map(c=>{const p=PIPE[c.id]||{};return [c.title,c.year||'',c.km||'',c.price||'',c.hand||'',siteName(c.site),p.status||'',p.notes||'',c.url].map(q).join(',');}));
+  const blob=new Blob(['﻿'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='favorites.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
 function go(screen){ S.screen=screen; S.selectedId=null; render(); }
 
 async function saveSettings(){
@@ -439,6 +447,9 @@ function viewResults(){
       <button data-act="tgl:dropOnly" style="padding:9px 14px;border-radius:var(--rd-radius-pill);font-size:13px;font-weight:600;${tgl(S.dropOnly)}">ירדו במחיר</button>
       <span style="margin-inline-start:auto;font-size:13px;color:var(--fg-muted)">${results.length} תוצאות</span>
     </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${[['all','כל האתרים',active.length]].concat(Object.keys(S.siteLabels).map(id=>[id,S.siteLabels[id],active.filter(c=>c.site===id).length]).filter(x=>x[2]>0)).map(([id,label,n])=>`<button data-act="siteset:${id}" style="padding:5px 12px;border-radius:var(--rd-radius-pill);font-size:12px;font-weight:600;border:1px solid ${S.site===id?'var(--brand)':'var(--border)'};background:${S.site===id?'var(--brand)':'transparent'};color:${S.site===id?'#fff':'var(--fg-muted)'}">${esc(label)} · ${n}</button>`).join('')}
+    </div>
     ${S.siteError?`<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--rd-radius-md);background:var(--rd-hyper-10);border:1px solid var(--rd-hyper-08);color:var(--rd-hyper-03);font-size:13px"><span style="font-size:16px">⚠︎</span><span>הסריקה של <b>${esc(S.siteError)}</b> לא החזירה תוצאות. שאר האתרים עודכנו כרגיל.</span><button data-act="dismisserr" style="margin-inline-start:auto;background:transparent;border:none;color:var(--rd-hyper-03);font-size:13px;text-decoration:underline">התעלם</button></div>`:''}
     ${isLoading?skeletons():''}
     ${isEmpty?emptyResults():''}
@@ -450,7 +461,7 @@ function viewFav(){
   const favList=S.cars.filter(c=>c.fav).sort((a,b)=>a.pct-b.pct);
   if(!favList.length) return `<div style="animation:rdup .3s var(--rd-ease-out)"><h1 style="font-family:var(--font-head);font-size:26px;font-weight:400;margin:0 0 16px">מועדפים</h1><div style="text-align:center;padding:64px 24px;border:1px dashed var(--border);border-radius:var(--rd-radius-lg);background:var(--bg-sunken)"><div style="font-size:44px;margin-bottom:12px">♡</div><div style="font-size:20px;font-weight:700;margin-bottom:6px">עוד לא סימנת מועדפים</div><div style="font-size:14px;color:var(--fg-muted);max-width:360px;margin:0 auto 18px">לחצי על ♥ בכרטיס רכב כדי לעקוב אחרי המחיר שלו לאורך זמן.</div><button data-act="nav:results" style="background:var(--action);color:var(--action-fg);border:none;padding:10px 20px;border-radius:var(--rd-radius-md);font-weight:700;font-size:14px">למסך התוצאות</button></div></div>`;
   return `<div style="display:flex;flex-direction:column;gap:16px;animation:rdup .3s var(--rd-ease-out)">
-    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><h1 style="font-family:var(--font-head);font-size:26px;font-weight:400;margin:0">מועדפים</h1><span style="font-size:13px;color:var(--fg-muted)">ממויין לפי ירידת המחיר הגדולה ביותר</span></div>
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><h1 style="font-family:var(--font-head);font-size:26px;font-weight:400;margin:0">מועדפים</h1><span style="font-size:13px;color:var(--fg-muted)">ממויין לפי ירידת המחיר הגדולה ביותר</span><button data-act="exportfavs" style="margin-inline-start:auto;background:var(--bg-elev);border:1px solid var(--border-strong);color:var(--fg);border-radius:var(--rd-radius-md);padding:8px 14px;font-weight:600;font-size:13px">⬇ ייצוא CSV</button></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">${favList.map(favCardHtml).join('')}</div>
   </div>`;
 }
@@ -708,6 +719,8 @@ $app.addEventListener('click',e=>{
   if(act.startsWith('cmp:')){ e.stopPropagation(); toggleCompare(act.slice(4)); return; }
   if(act.startsWith('share:')){ e.stopPropagation(); shareListing(act.slice(6)); return; }
   if(act.startsWith('sim:')){ openCar(act.slice(4)); return; }
+  if(act.startsWith('siteset:')){ S.site=act.slice(8); render(); return; }
+  if(act==='exportfavs'){ exportFavs(); return; }
   if(act==='clearcmp'){ S.compare=[]; S.showCompare=false; render(); return; }
   if(act==='opencmp'){ S.showCompare=true; render(); return; }
   if(act==='closewelcome'){ if(e.target.closest('[data-stop]')&&t.getAttribute('data-act')!=='closewelcome') return; S.showWelcome=false; render(); return; }
