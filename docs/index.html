@@ -24,6 +24,14 @@
   --rd-radius-xs:2px;--rd-radius-sm:4px;--rd-radius-md:5px;--rd-radius-lg:8px;--rd-radius-xl:12px;--rd-radius-pill:999px;
   --rd-ease-out:cubic-bezier(0.16,1,0.3,1);
 }
+/* light theme (default when .theme-dark is absent) */
+:root{
+  --bg:#FFFFFF;--bg-elev:#F5F6F7;--bg-sunken:#EDEFF1;
+  --fg:#091A23;--fg-muted:#2D4754;--fg-subtle:#5C707A;
+  --border:#DCE0E3;--border-strong:#8A99A0;
+  --action:var(--rd-hyper-05);--action-hover:var(--rd-hyper-06);--action-fg:#fff;
+  color-scheme:light;
+}
 .theme-dark{
   --bg:var(--rd-midnight-base);--bg-elev:var(--rd-dusk-09);--bg-sunken:var(--rd-midnight-02);
   --fg:var(--rd-white);--fg-muted:var(--rd-dusk-04);--fg-subtle:var(--rd-dusk-05);
@@ -66,7 +74,7 @@ const $app = document.getElementById('app');
 // ---------- state ----------
 const S = {
   screen:'results', site:'all', sort:'newest', query:'',
-  newOnly:false, favOnly:false, dropOnly:false,
+  newOnly:false, favOnly:false, dropOnly:false, alertOnly:false,
   selectedId:null, trendRange:30, isMobile:false,
   loading:true, scanning:false, scanDone:0, scanTotal:6,
   lastScan:null, siteError:null,
@@ -135,6 +143,16 @@ const PIPE_STATUS = ['','מתעניינת','יצרתי קשר','נסיעת מב�
 function setPipe(id,key,val){ PIPE[id]=PIPE[id]||{}; PIPE[id][key]=val; lsSet('pipe',PIPE); }
 function toggleCompare(id){ const i=S.compare.indexOf(id); if(i>=0)S.compare.splice(i,1); else if(S.compare.length<3)S.compare.push(id); render(); }
 let EXCLUDE = (lsGet('exclude',[])||[]).map(w=>String(w).toLowerCase()).filter(Boolean);
+let THEME = lsGet('theme','dark');
+const PROFILES = lsGet('profiles',[])||[];   // saved view states
+const ALERTS = lsGet('alerts',[])||[];       // [{model,maxPrice}] price-threshold alerts
+function setTheme(t){ THEME=t; lsSet('theme',t); const on=t==='dark'; $app.classList.toggle('theme-dark',on); document.body.classList.toggle('theme-dark',on); document.body.style.background = on?'#091A23':'#F3F3F3'; }
+function alertMatch(c){ return ALERTS.some(a=>a.maxPrice&&c.price&&c.price<=a.maxPrice&&(!a.model||`${c.title} ${c.model}`.toLowerCase().includes(String(a.model).toLowerCase()))); }
+function applyProfile(i){ const v=(PROFILES[i]||{}).view||{}; S.query=v.query||''; S.site=v.site||'all'; S.sort=v.sort||'newest'; S.newOnly=!!v.newOnly; S.favOnly=!!v.favOnly; S.dropOnly=!!v.dropOnly; render(); }
+function saveProfile(){ const name=(prompt('שם לתצוגה השמורה:')||'').trim(); if(!name) return; PROFILES.push({name,view:{query:S.query,site:S.site,sort:S.sort,newOnly:S.newOnly,favOnly:S.favOnly,dropOnly:S.dropOnly}}); lsSet('profiles',PROFILES); render(); }
+function delProfile(i){ PROFILES.splice(i,1); lsSet('profiles',PROFILES); render(); }
+function addAlert(){ const m=($app.querySelector('[data-input="al_model"]')||{}).value||''; const p=Number(($app.querySelector('[data-input="al_price"]')||{}).value||0); if(!p) return; ALERTS.push({model:m.trim(),maxPrice:p}); lsSet('alerts',ALERTS); render(); }
+function delAlert(i){ ALERTS.splice(i,1); lsSet('alerts',ALERTS); render(); }
 const daysOnMarket = c => { const d=Math.floor((Date.now()-c.firstSeen)/86400000); return d<=0?'היום':(d===1?'יום אחד':`${d} ימים`); };
 const excluded = c => EXCLUDE.some(w => `${c.title||''} ${c.notes||''}`.toLowerCase().includes(w));
 function mergeUnits(cars){
@@ -348,6 +366,7 @@ function filteredResults(){
   if(S.newOnly) units=units.filter(u=>u.isNew);
   if(S.favOnly) units=units.filter(u=>u.fav);
   if(S.dropOnly) units=units.filter(u=>u.dir==='down');
+  if(S.alertOnly) units=units.filter(u=>alertMatch(u));
   const q=(S.query||'').trim().toLowerCase();
   if(q) units=units.filter(u=>`${u.title} ${u.model} ${u.region} ${siteName(u.site)} ${u.notes||''}`.toLowerCase().includes(q));
   const by={newest:(a,b)=>b.firstSeen-a.firstSeen,price:(a,b)=>a.price-b.price,km:(a,b)=>(a.km||1e9)-(b.km||1e9),year:(a,b)=>(b.year||0)-(a.year||0),drop:(a,b)=>a.pct-b.pct,deal:(a,b)=>((dealDelta(a)??1e9)-(dealDelta(b)??1e9))};
@@ -374,6 +393,7 @@ function cardHtml(c){
         ${c.dir==='down'?`<span style="background:var(--good);color:#04231a;font-size:11px;font-weight:800;padding:3px 8px;border-radius:var(--rd-radius-sm)">ירידת מחיר</span>`:''}
         ${redFlags(c).length?`<span style="background:var(--bad);color:#fff;font-size:11px;font-weight:800;padding:3px 8px;border-radius:var(--rd-radius-sm)">⚠ דגל אדום</span>`:''}
         ${c.siteCount>1?`<span style="background:var(--rd-blue-03);color:#04231a;font-size:11px;font-weight:800;padding:3px 8px;border-radius:var(--rd-radius-sm)">ב-${c.siteCount} אתרים</span>`:''}
+        ${alertMatch(c)?`<span style="background:var(--rd-yellow-05);color:#091A23;font-size:11px;font-weight:800;padding:3px 8px;border-radius:var(--rd-radius-sm)">🔔 מתחת לסף</span>`:''}
       </div>
       <button data-act="fav:${c.id}" data-stop aria-label="הוסף למועדפים" style="position:absolute;top:8px;inset-inline-end:8px;width:36px;height:36px;border-radius:50%;border:none;background:rgba(9,26,23,.6);backdrop-filter:blur(4px);color:${c.fav?'var(--brand)':'#fff'};font-size:18px;display:flex;align-items:center;justify-content:center;line-height:1">${c.fav?'♥':'♡'}</button>
       <span style="position:absolute;bottom:8px;inset-inline-end:8px;background:rgba(9,26,23,.72);color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:var(--rd-radius-sm)">${esc(siteName(c.site))}</span>
@@ -425,6 +445,11 @@ function viewResults(){
   const siteOpts=[['all','כל האתרים'],...Object.keys(S.siteLabels).map(id=>[id,S.siteLabels[id]])];
   const sortOpts=[['newest','החדשים ביותר'],['price','מחיר (נמוך לגבוה)'],['km','קילומטראז׳'],['year','שנתון (חדש לישן)'],['drop','ירידת המחיר הגדולה'],['deal','עסקה טובה (מתחת לחציון)']];
   return `<div style="display:flex;flex-direction:column;gap:16px;animation:rdup .3s var(--rd-ease-out)">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--fg-muted)">תצוגות שמורות:</span>
+      ${PROFILES.map((p,i)=>`<span style="display:inline-flex;align-items:center;background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-pill);overflow:hidden"><button data-act="prof:${i}" style="background:transparent;border:none;color:var(--fg);font-size:12px;font-weight:600;padding:5px 10px">${esc(p.name)}</button><button data-act="delprof:${i}" style="background:transparent;border:none;color:var(--fg-subtle);font-size:11px;padding:5px 8px">✕</button></span>`).join('')}
+      <button data-act="saveprof" style="background:transparent;border:1px dashed var(--border);border-radius:var(--rd-radius-pill);color:var(--fg-muted);font-size:12px;padding:5px 12px">+ שמור תצוגה נוכחית</button>
+    </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
       ${statCard('רכבים פעילים',active.length,null,'clearfilters',false)}
       <div data-act="tgl:newOnly" style="background:var(--bg-elev);border:1px solid var(--brand);border-radius:var(--rd-radius-lg);padding:14px 16px;position:relative;overflow:hidden;cursor:pointer">
@@ -450,6 +475,7 @@ function viewResults(){
     <div style="display:flex;flex-wrap:wrap;gap:6px">
       ${[['all','כל האתרים',active.length]].concat(Object.keys(S.siteLabels).map(id=>[id,S.siteLabels[id],active.filter(c=>c.site===id).length]).filter(x=>x[2]>0)).map(([id,label,n])=>`<button data-act="siteset:${id}" style="padding:5px 12px;border-radius:var(--rd-radius-pill);font-size:12px;font-weight:600;border:1px solid ${S.site===id?'var(--brand)':'var(--border)'};background:${S.site===id?'var(--brand)':'transparent'};color:${S.site===id?'#fff':'var(--fg-muted)'}">${esc(label)} · ${n}</button>`).join('')}
     </div>
+    ${ALERTS.length?(()=>{const m=S.cars.filter(c=>c.avail&&alertMatch(c)).length;return `<div data-act="tgl:alertOnly" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--rd-radius-md);background:rgba(220,255,30,.1);border:1px solid var(--rd-yellow-06);color:var(--rd-yellow-06);font-size:13px;font-weight:600;cursor:pointer"><span>🔔</span><span>${m} רכבים מתחת לסף שהגדרת${S.alertOnly?' · מציג אותם בלבד (הקליקי לביטול)':' · הקליקי לסינון'}</span></div>`;})():''}
     ${S.siteError?`<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--rd-radius-md);background:var(--rd-hyper-10);border:1px solid var(--rd-hyper-08);color:var(--rd-hyper-03);font-size:13px"><span style="font-size:16px">⚠︎</span><span>הסריקה של <b>${esc(S.siteError)}</b> לא החזירה תוצאות. שאר האתרים עודכנו כרגיל.</span><button data-act="dismisserr" style="margin-inline-start:auto;background:transparent;border:none;color:var(--rd-hyper-03);font-size:13px;text-decoration:underline">התעלם</button></div>`:''}
     ${isLoading?skeletons():''}
     ${isEmpty?emptyResults():''}
@@ -590,6 +616,16 @@ function viewSettings(){
       <button data-act="applyexclude" style="margin-top:10px;background:var(--rd-dusk-08);color:var(--fg);border:1px solid var(--border-strong);border-radius:var(--rd-radius-md);padding:9px 16px;font-weight:700;font-size:14px">החל</button>
     </section>
     <section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:20px">
+      <div style="font-family:var(--font-head);font-size:16px;margin-bottom:4px">התראות מחיר</div>
+      <div style="font-size:13px;color:var(--fg-muted);margin-bottom:12px">סימון 🔔 בכרטיס + באנר כשמופיע רכב מתחת לסף. דגם ריק = כל דגם.</div>
+      ${ALERTS.map((a,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-size:14px;font-weight:600">${esc(a.model||'כל דגם')} — מתחת ל-${fmtP(a.maxPrice)}</span><button data-act="delalert:${i}" style="margin-inline-start:auto;background:transparent;border:1px solid var(--border);color:var(--fg-muted);width:26px;height:26px;border-radius:var(--rd-radius-sm)">✕</button></div>`).join('')}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        <input data-input="al_model" placeholder="דגם (ריק = הכל)" style="flex:1;min-width:120px;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">
+        <input data-input="al_price" type="number" placeholder="מחיר מקסימלי ₪" style="width:160px;background:var(--bg-sunken);border:1px solid var(--border);color:var(--fg);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:14px">
+        <button data-act="addalert" style="background:var(--rd-dusk-08);color:var(--fg);border:1px solid var(--border-strong);border-radius:var(--rd-radius-md);padding:9px 16px;font-weight:700;font-size:14px">הוסף התראה</button>
+      </div>
+    </section>
+    <section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--rd-radius-lg);padding:20px">
       <div style="font-family:var(--font-head);font-size:16px;margin-bottom:4px">סטטוס סריקה לפי אתר</div>
       <div style="font-size:13px;color:var(--fg-muted);margin-bottom:12px">מתי כל אתר החזיר מודעות לאחרונה — כדי לזהות אתר שנכשל בשקט.</div>
       <div style="display:flex;flex-direction:column;gap:2px">
@@ -691,6 +727,7 @@ function render(){
         <div style="display:flex;align-items:center;gap:12px">
           ${S.isMobile?'':`<span style="font-size:12px;color:var(--fg-muted);white-space:nowrap">סריקה אחרונה: ${relTime(S.lastScan)}</span>`}
           <button class="scanbtn" data-act="scan" ${S.scanning?'disabled':''} style="display:flex;align-items:center;gap:8px;background:#EC4899;color:#fff;border:none;padding:0 18px;height:42px;border-radius:var(--rd-radius-md);font-weight:700;font-size:14px;white-space:nowrap;opacity:${S.scanning?'0.85':'1'}">${S.scanning?`<span style="width:15px;height:15px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:rdspin .7s linear infinite"></span>`:''}<span>${scanLabel}</span></button>
+          <button data-act="theme" title="מצב תצוגה" style="width:42px;height:42px;flex:none;border-radius:var(--rd-radius-md);border:1px solid var(--border);background:var(--bg-elev);color:var(--fg);font-size:16px;display:flex;align-items:center;justify-content:center">${THEME==='dark'?'☀️':'🌙'}</button>
           <button data-act="nav:settings" aria-label="הגדרות" title="הגדרות" style="width:42px;height:42px;flex:none;border-radius:var(--rd-radius-md);border:1px solid ${S.screen==='settings'?'var(--brand)':'var(--border)'};background:var(--bg-elev);color:var(--fg);font-size:18px;display:flex;align-items:center;justify-content:center">⚙️</button>
         </div>
       </div>
@@ -738,6 +775,12 @@ $app.addEventListener('click',e=>{
   else if(act.startsWith('site:')) toggleSite(act.slice(5));
   else if(act==='startup'){ S.sched.startup=!S.sched.startup; render(); }
   else if(act==='applyexclude'){ const el=$app.querySelector('[data-input="excludeText"]'); setExclude(el?el.value:''); render(); }
+  else if(act==='theme'){ setTheme(THEME==='dark'?'light':'dark'); render(); }
+  else if(act.startsWith('prof:')){ applyProfile(Number(act.slice(5))); }
+  else if(act.startsWith('delprof:')){ delProfile(Number(act.slice(8))); }
+  else if(act==='saveprof'){ saveProfile(); }
+  else if(act==='addalert'){ addAlert(); }
+  else if(act.startsWith('delalert:')){ delAlert(Number(act.slice(9))); }
   else if(act==='save') saveSettings();
   else if(act==='closedrawer'){ if(e.target.closest('[data-stop]')&&e.target.getAttribute('data-act')!=='closedrawer') return; S.selectedId=null; render(); }
 });
@@ -764,6 +807,7 @@ S.isMobile=mq.matches; mq.addEventListener('change',ev=>{S.isMobile=ev.matches;r
 
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
 
+setTheme(THEME);
 loadAll();
 </script>
 </body>
