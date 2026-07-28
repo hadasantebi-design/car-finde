@@ -67,8 +67,17 @@ const S = {
   cars:[], trend:{}, siteLabels:{},
   models:[], filters:{}, sites:[], sched:{time:'08:00',tz:'Asia/Jerusalem',startup:false},
   siteStatus:{}, undoHide:null, compare:[], showCompare:false,
+  showWelcome:false, welcomeTitle:'',
   saved:false,
 };
+const WELCOME_TITLES=[
+  'עוד לא מצאת לי אוטו :(',
+  'אני עדיין נוסעת באוטו בלי מזגן',
+  'הלוואי והיה לי כבר אוטו חדש',
+  'נו, איפה האוטו שלי? 🚗',
+  'כל יום בלי אוטו חדש זה יום מבוזבז',
+  'האוטו הבא שלך מחכה איפשהו פה',
+];
 
 // site status (which sources are live vs need a browser vs coming soon)
 const SITE_STATUS = {
@@ -198,7 +207,31 @@ async function loadData(){
   S.lastScan = dl.stats && dl.stats.last_run ? dl.stats.last_run.started : null;
   S.trend = (await rt.json()).trends||{};
 }
-async function loadAll(){ S.loading=true; render(); await loadData(); S.loading=false; render(); }
+async function loadAll(){
+  S.loading=true; render(); await loadData(); S.loading=false;
+  if(!sessionStorage.getItem('cf_welcomed')){
+    sessionStorage.setItem('cf_welcomed','1');
+    S.welcomeTitle=WELCOME_TITLES[Math.floor(Math.random()*WELCOME_TITLES.length)];
+    S.showWelcome=true;
+  }
+  render();
+}
+function welcomeHtml(){
+  const unseen=S.cars.filter(c=>c.avail&&c.isNew).length;
+  const total=S.cars.filter(c=>c.avail).length;
+  const msg = unseen>0
+    ? `יש <b style="color:var(--brand-mid)">${unseen}</b> מודעות חדשות שעוד לא ראית`
+    : `אין עדיין מודעות חדשות — אבל יש לך <b>${total}</b> מודעות קיימות כדי להניע את הדברים`;
+  return `<div data-act="closewelcome" style="position:fixed;inset:0;z-index:80;background:rgba(7,21,28,.7);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:20px;animation:rdscrim .2s ease">
+    <div data-stop style="background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:var(--rd-radius-xl);max-width:420px;width:100%;padding:30px 24px;text-align:center;animation:rdup .3s var(--rd-ease-out);position:relative;overflow:hidden">
+      <div style="position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 0,rgba(236,72,153,.18),transparent 60%);pointer-events:none"></div>
+      <div style="font-size:46px;margin-bottom:8px;position:relative">🚗💨</div>
+      <div style="font-family:var(--font-head);font-size:24px;line-height:1.3;margin-bottom:12px;position:relative">${esc(S.welcomeTitle||'')}</div>
+      <div style="font-size:15px;color:var(--fg-muted);margin-bottom:24px;position:relative">${msg}</div>
+      <button data-act="closewelcome" style="background:var(--action);color:#fff;border:none;padding:12px 30px;border-radius:var(--rd-radius-md);font-weight:700;font-size:15px;position:relative">קדימה, בואי נראה 👀</button>
+    </div>
+  </div>`;
+}
 
 // ---------- actions ----------
 async function scanNow(){
@@ -648,6 +681,7 @@ function render(){
     ${S.compare.length?`<div style="position:fixed;z-index:62;bottom:${S.isMobile?'84px':'16px'};inset-inline-end:16px;display:flex;gap:8px;align-items:center;background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:var(--rd-radius-pill);padding:8px 8px 8px 16px;box-shadow:0 24px 48px rgba(0,0,0,.4)"><span style="font-size:13px;font-weight:700">להשוואה · ${S.compare.length}</span><button data-act="clearcmp" style="background:transparent;border:none;color:var(--fg-muted);font-size:12px">נקה</button><button data-act="opencmp" ${S.compare.length<2?'disabled':''} style="background:var(--action);color:#fff;border:none;padding:8px 16px;border-radius:var(--rd-radius-pill);font-weight:700;font-size:13px;opacity:${S.compare.length<2?'.5':'1'}">השווה</button></div>`:''}
     ${S.showCompare?compareHtml():''}
     ${S.selectedId?drawerHtml():''}
+    ${S.showWelcome?welcomeHtml():''}
   `;
 }
 
@@ -664,6 +698,7 @@ $app.addEventListener('click',e=>{
   if(act.startsWith('cmp:')){ e.stopPropagation(); toggleCompare(act.slice(4)); return; }
   if(act==='clearcmp'){ S.compare=[]; S.showCompare=false; render(); return; }
   if(act==='opencmp'){ S.showCompare=true; render(); return; }
+  if(act==='closewelcome'){ if(e.target.closest('[data-stop]')&&t.getAttribute('data-act')!=='closewelcome') return; S.showWelcome=false; render(); return; }
   if(act==='closecmp'){ if(e.target.closest('[data-stop]')&&t.getAttribute('data-act')!=='closecmp') return; S.showCompare=false; render(); return; }
   if(act.startsWith('nav:')) go(act.slice(4));
   else if(act==='scan') scanNow();
