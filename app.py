@@ -109,7 +109,8 @@ def api_favorite(body: FavoriteIn):
 @app.get("/api/config")
 def api_get_config():
     from scrapers import all_site_labels
-    return {"config": engine.load_config(), "site_labels": all_site_labels()}
+    return {"config": engine.load_config(), "site_labels": all_site_labels(),
+            "site_status": storage.get_site_status()}
 
 
 class ConfigIn(BaseModel):
