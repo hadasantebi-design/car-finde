@@ -77,12 +77,13 @@ const S = {
   saved:false,
 };
 const WELCOME_TITLES=[
-  'עוד לא מצאת לי אוטו :(',
-  'אני עדיין נוסעת באוטו בלי מזגן',
-  'הלוואי והיה לי כבר אוטו חדש',
-  'נו, איפה האוטו שלי? 🚗',
-  'כל יום בלי אוטו חדש זה יום מבוזבז',
-  'האוטו הבא שלך מחכה איפשהו פה',
+  'גולי, עוד לא מצאת לי אוטו? :(',
+  'גולי, אני עדיין נוסעת באוטו בלי מזגן…',
+  'גולי, כמה עוד אני צריכה לחכות לאוטו? 🥺',
+  'גולי, בבקשה תמצאי לי כבר אוטו…',
+  'גולי, האוטו הישן שלי בקושי נוסע 😢',
+  'גולי, אני חולמת על אוטו חדש בלילות',
+  'גולי, רחמי עליי ותמצאי לי אוטו 🙏',
 ];
 
 // site status (which sources are live vs need a browser vs coming soon)
@@ -439,7 +440,6 @@ function viewResults(){
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
       <input data-qinput value="${esc(S.query)}" placeholder="🔍 חיפוש חופשי…" style="background:var(--bg-elev);color:var(--fg);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:9px 12px;font-size:13px;min-width:170px">
-      ${selectHtml('site',S.site,siteOpts)}
       ${selectHtml('sort',S.sort,sortOpts)}
       <div style="width:1px;height:24px;background:var(--border);margin:0 2px"></div>
       <button data-act="tgl:newOnly" style="padding:9px 14px;border-radius:var(--rd-radius-pill);font-size:13px;font-weight:600;${tgl(S.newOnly)}">חדשים בלבד</button>
