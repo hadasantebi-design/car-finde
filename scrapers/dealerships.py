@@ -247,7 +247,7 @@ class EldanScraper(BaseScraper):
                 fuel=spec.fuel,
                 title=it.get("carDisplayName") or f"{make_he} {model}",
                 image=img_url,
-                raw={"carNumber": car_no},
+                raw={"carNumber": car_no, "plate": car_no},
             )
             if self.passes_filters(lst, spec.filters):
                 out.append(lst)
@@ -438,6 +438,8 @@ class KalmobilScraper(BrowserScraper):
                 model_part = next((p for p in parts if p and not re.search(r'[\d₪]|צרו|להשוואה|לחודש|השווא', p)), "")
                 if not model_part:
                     model_part = f"{spec.make} {spec.model}"
+                pm = re.search(r"/(\d{5,})/?$", href or "")
+                cplate = pm.group(1) if pm else None
                 year = re.search(r"שנה\s*(\d{4})", txt)
                 hand = re.search(r"יד\s*0*(\d+)", txt)
                 km = re.search(r"([\d,]+)\s*ק", txt)
@@ -450,7 +452,7 @@ class KalmobilScraper(BrowserScraper):
                     hand=int(hand.group(1)) if hand else None,
                     fuel=spec.fuel,
                     title=f"{model_part} {year.group(1)}".strip() if year else (model_part or f"{spec.make} {spec.model}"),
-                    image="", raw={},
+                    image="", raw={"plate": cplate},
                 )
                 if self.passes_filters(lst, spec.filters):
                     out.append(lst)
@@ -560,7 +562,7 @@ class FreesbeScraper(BaseScraper):
                     hand=it.get("carHand"), fuel=spec.fuel,
                     title=f"{it.get('carZoneManufacturerName','')} {model} {it.get('year') or ''}".strip(),
                     image=img, notes=(f"{origin} {desc}").strip()[:250], seller_type="dealer",
-                    raw={"origin": origin},
+                    raw={"origin": origin, "plate": cn},
                 )
                 if self.passes_filters(lst, spec.filters):
                     out.append(lst)

@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 import storage
-from scrapers import get_scraper
+from scrapers import get_scraper, govdata
 from scrapers.base import SearchSpec
 
 log = logging.getLogger("engine")
@@ -55,6 +55,11 @@ def run_scan() -> dict:
                 site_errors += 1
                 last_err = str(e)
             for lst in results:
+                plate = (lst.raw or {}).get("plate")
+                if plate:  # enrich with official MoT data (ownership/test/on-road)
+                    note = govdata.official_note(plate)
+                    if note:
+                        lst.notes = (lst.notes + " | " + note) if lst.notes else note
                 row = lst.to_row()
                 all_rows.append(row)
                 active_ids.append(row["id"])
