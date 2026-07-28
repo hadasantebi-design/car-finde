@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>גולי תמצא לי רכב</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2288%22>🚗</text></svg>">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#EC4899">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="גולי רכב">
+<link rel="apple-touch-icon" href="icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&family=Secular+One&display=swap" rel="stylesheet">
@@ -268,6 +274,7 @@ let _hideTimer=null;
 function hideListing(id){ HIDDEN.add(id); lsSet('hidden',[...HIDDEN]); S.undoHide=id; render(); clearTimeout(_hideTimer); _hideTimer=setTimeout(()=>{S.undoHide=null;render();},6000); }
 function unhide(id){ if(!id) return; HIDDEN.delete(id); lsSet('hidden',[...HIDDEN]); S.undoHide=null; render(); }
 function setExclude(text){ EXCLUDE=(text||'').split(/[\n,]/).map(w=>w.trim().toLowerCase()).filter(Boolean); lsSet('exclude',EXCLUDE); }
+function shareListing(id){ const c=S.cars.find(x=>x.id===id); if(!c) return; const text=`${c.title} · ${fmtP(c.price)}\n${c.url}`; if(navigator.share){ navigator.share({title:c.title,text,url:c.url}).catch(()=>{}); } else { window.open('https://wa.me/?text='+encodeURIComponent(text),'_blank'); } }
 function go(screen){ S.screen=screen; S.selectedId=null; render(); }
 
 async function saveSettings(){
@@ -598,7 +605,8 @@ function drawerHtml(){
       <div style="position:sticky;top:0;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:14px 18px;display:flex;align-items:center;gap:12px;z-index:2">
         <button data-act="closedrawer" aria-label="סגור" style="width:36px;height:36px;border-radius:var(--rd-radius-md);border:1px solid var(--border);background:var(--bg-elev);font-size:18px">✕</button>
         <span style="font-family:var(--font-head);font-size:16px">היסטוריית מחיר</span>
-        <button data-act="fav:${c.id}" style="margin-inline-start:auto;display:flex;align-items:center;gap:6px;background:var(--bg-elev);border:1px solid ${c.fav?'var(--brand)':'var(--border)'};color:${c.fav?'var(--brand)':'#fff'};border-radius:var(--rd-radius-md);padding:7px 14px;font-weight:600;font-size:13px">${c.fav?'♥':'♡'} ${c.fav?'במועדפים':'הוסף למועדפים'}</button>
+        <button data-act="share:${c.id}" title="שתף" style="margin-inline-start:auto;width:38px;height:38px;flex:none;border-radius:var(--rd-radius-md);border:1px solid var(--border);background:var(--bg-elev);font-size:15px">↗</button>
+        <button data-act="fav:${c.id}" style="display:flex;align-items:center;gap:6px;background:var(--bg-elev);border:1px solid ${c.fav?'var(--brand)':'var(--border)'};color:${c.fav?'var(--brand)':'#fff'};border-radius:var(--rd-radius-md);padding:7px 14px;font-weight:600;font-size:13px">${c.fav?'♥':'♡'} ${c.fav?'במועדפים':'הוסף למועדפים'}</button>
       </div>
       <div style="padding:18px;display:flex;flex-direction:column;gap:18px">
         <div style="aspect-ratio:16/9;border-radius:var(--rd-radius-lg);overflow:hidden;background:var(--bg-sunken);border:1px solid var(--border)">${imgHtml(c)}</div>
@@ -625,6 +633,7 @@ function drawerHtml(){
           <div style="background:var(--bg-sunken);border:1px solid var(--border);border-radius:var(--rd-radius-md);padding:12px 14px"><div style="font-size:11px;color:var(--fg-subtle)">נצפה לאחרונה</div><div style="font-size:14px;font-weight:600">${dFull(c.lastSeen)}</div></div>
         </div>
         <a class="srcbtn" href="${esc(c.url)}" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:center;gap:8px;background:var(--bg-elev);border:1px solid var(--border-strong);color:var(--fg);border-radius:var(--rd-radius-md);padding:13px;font-weight:700;font-size:15px">צפייה במקור באתר ${esc(siteName(c.site))} ↗</a>
+        ${(function(){const sim=S.cars.filter(x=>x.avail&&x.id!==c.id&&x.make===c.make&&x.model===c.model).sort((a,b)=>(Math.abs((a.year||0)-(c.year||0))-Math.abs((b.year||0)-(c.year||0)))||((a.price||0)-(b.price||0))).slice(0,3);return sim.length?`<div><div style="font-size:13px;font-weight:700;margin-bottom:8px">רכבים דומים</div>${sim.map(x=>`<div data-act="sim:${x.id}" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin-bottom:6px;background:var(--bg-sunken);border:1px solid var(--border);border-radius:var(--rd-radius-md);cursor:pointer"><span style="font-size:13px">${esc(x.title)}</span><span style="display:flex;gap:10px;align-items:center;font-size:12px;color:var(--fg-muted)"><span>${x.km!=null?x.km.toLocaleString('en-US')+' ק״מ':''}</span><b style="color:var(--fg)">${fmtP(x.price)}</b></span></div>`).join('')}</div>`:'';})()}
       </div>
     </div>
   </div>`;
@@ -696,6 +705,8 @@ $app.addEventListener('click',e=>{
   if(act.startsWith('hide:')){ e.stopPropagation(); hideListing(act.slice(5)); return; }
   if(act==='unhide'){ unhide(S.undoHide); return; }
   if(act.startsWith('cmp:')){ e.stopPropagation(); toggleCompare(act.slice(4)); return; }
+  if(act.startsWith('share:')){ e.stopPropagation(); shareListing(act.slice(6)); return; }
+  if(act.startsWith('sim:')){ openCar(act.slice(4)); return; }
   if(act==='clearcmp'){ S.compare=[]; S.showCompare=false; render(); return; }
   if(act==='opencmp'){ S.showCompare=true; render(); return; }
   if(act==='closewelcome'){ if(e.target.closest('[data-stop]')&&t.getAttribute('data-act')!=='closewelcome') return; S.showWelcome=false; render(); return; }
@@ -736,6 +747,8 @@ $app.addEventListener('input',e=>{
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&S.selectedId){S.selectedId=null;render();} });
 const mq=window.matchMedia('(max-width:860px)');
 S.isMobile=mq.matches; mq.addEventListener('change',ev=>{S.isMobile=ev.matches;render();});
+
+if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
 
 loadAll();
 </script>

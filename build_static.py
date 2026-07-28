@@ -47,6 +47,35 @@ def build(scan: bool = True):
     shutil.copyfile(ROOT / "static" / "index.html", DOCS / "index.html")
     # Pages must not run Jekyll (it would ignore files); mark as plain static.
     (DOCS / ".nojekyll").write_text("", encoding="utf-8")
+    _write_pwa()
+
+
+def _write_pwa():
+    """Write the PWA assets (manifest, icon, service worker) into docs/."""
+    icon = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'>"
+            "<rect width='512' height='512' rx='96' fill='#EC4899'/>"
+            "<text x='50%' y='54%' font-size='300' text-anchor='middle' "
+            "dominant-baseline='central'>\U0001F697</text></svg>")
+    (DOCS / "icon.svg").write_text(icon, encoding="utf-8")
+    manifest = {
+        "name": "גולי תמצא לי רכב", "short_name": "גולי רכב",
+        "start_url": ".", "scope": ".", "display": "standalone",
+        "background_color": "#091A23", "theme_color": "#EC4899", "dir": "rtl", "lang": "he",
+        "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
+    }
+    (DOCS / "manifest.webmanifest").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    sw = (
+        "const C='cf-v1';\n"
+        "self.addEventListener('install',e=>{self.skipWaiting();});\n"
+        "self.addEventListener('activate',e=>{e.waitUntil(clients.claim());});\n"
+        "self.addEventListener('fetch',e=>{const u=new URL(e.request.url);\n"
+        " if(e.request.method!=='GET'){return;}\n"
+        " if(u.pathname.endsWith('data.json')){\n"
+        "  e.respondWith(fetch(e.request).then(r=>{const c=r.clone();caches.open(C).then(x=>x.put(e.request,c));return r;}).catch(()=>caches.match(e.request)));return;}\n"
+        " e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{const c=res.clone();caches.open(C).then(x=>x.put(e.request,c));return res;}).catch(()=>caches.match('index.html'))));\n"
+        "});\n"
+    )
+    (DOCS / "sw.js").write_text(sw, encoding="utf-8")
     print(f"wrote {DOCS/'data.json'} ({len(data['listings'])} listings) and index.html")
 
 
